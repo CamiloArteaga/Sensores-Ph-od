@@ -638,7 +638,9 @@ export default function App() {
     setLog(l => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...l].slice(0, 60));
 
   useEffect(() => {
-    fetch(`${API}/api/history?hours=24`)
+    fetch(`${API}/api/history?hours=24`, {
+      headers: { "ngrok-skip-browser-warning": "true" },
+    })
       .then(r => r.json())
       .then(rows => setHistory(rows.map(r => ({ ...r, time: r.timestamp }))))
       .catch(() => {});
@@ -662,10 +664,16 @@ export default function App() {
     return () => ws.current?.close();
   }, []);
 
+  // ngrok-skip-browser-warning evita la página de advertencia de ngrok en APIs
+  const HEADERS = {
+    "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
+  };
+
   const sendCmd = async cmd => {
     await fetch(`${API}/api/command`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: HEADERS,
       body: JSON.stringify({ cmd }),
     });
     addLog(`Enviado: ${cmd}`);
