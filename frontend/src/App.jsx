@@ -211,14 +211,14 @@ function MetricBlock({ label, value, unit, metricKey, deviceColor, sparkData }) 
       </div>
 
       {/* Animated value */}
-      <div style={{ height: 46, overflow: "hidden", display: "flex", alignItems: "center" }}>
+      <div style={{ height: 44, overflow: "hidden", display: "flex", alignItems: "center" }}>
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.div
             key={value?.toFixed(2) ?? "null"}
             style={{ display: "flex", alignItems: "baseline", gap: 6 }}
-            initial={{ opacity: 0, y: -14 }}
+            initial={{ opacity: 0, y: -12 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 14 }}
+            exit={{ opacity: 0, y: 12 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
           >
             <motion.span
@@ -226,7 +226,7 @@ function MetricBlock({ label, value, unit, metricKey, deviceColor, sparkData }) 
               transition={{ duration: 0.4 }}
               style={{
                 fontFamily: "ui-monospace,monospace",
-                fontSize: "2.65rem", fontWeight: 700, lineHeight: 1,
+                fontSize: "clamp(1.85rem, 4.5vw, 2.65rem)", fontWeight: 700, lineHeight: 1,
               }}
             >
               {value != null ? value.toFixed(2) : "—"}
@@ -236,9 +236,11 @@ function MetricBlock({ label, value, unit, metricKey, deviceColor, sparkData }) 
         </AnimatePresence>
       </div>
 
-      {/* Range bar + sparkline */}
+      {/* Range bar siempre visible; sparkline solo en sm+ */}
       <RangeBar value={value} metricKey={metricKey} />
-      <Sparkline data={sparkData} dataKey={metricKey} color={deviceColor} />
+      <div className="hidden sm:block">
+        <Sparkline data={sparkData} dataKey={metricKey} color={deviceColor} />
+      </div>
     </div>
   );
 }
@@ -263,10 +265,9 @@ function DeviceCard({ id, dev, history }) {
 
   return (
     <motion.div
-      className="flex flex-col gap-4 flex-1"
+      className="flex flex-col gap-4"
       style={{
-        minWidth: 200,
-        borderRadius: 20, padding: "20px",
+        borderRadius: 20, padding: "clamp(14px,3vw,20px)",
         background: "rgba(5,15,26,0.85)",
         backdropFilter: "blur(10px)",
         border: `1px solid ${online ? cfg.color + "28" : "#0a2540"}`,
@@ -347,20 +348,177 @@ function DeviceCard({ id, dev, history }) {
   );
 }
 
+// ── ChartModal ──────────────────────────────────────────────────────────────
+function ChartModal({ chart, history, onClose }) {
+  // Cerrar con Escape
+  useEffect(() => {
+    const handler = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <motion.div
+      style={{
+        position: "fixed", inset: 0, zIndex: 50,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "clamp(12px,3vw,32px)",
+        background: "rgba(2,11,18,0.85)",
+        backdropFilter: "blur(8px)",
+      }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <motion.div
+        style={{
+          width: "100%", maxWidth: 900,
+          background: "rgba(5,15,26,0.98)", border: "1px solid #0d3b5e",
+          borderRadius: 24, padding: "clamp(16px,3vw,28px)",
+          boxShadow: "0 24px 80px rgba(0,229,195,0.06), 0 0 0 1px #00e5c310",
+        }}
+        initial={{ scale: 0.94, opacity: 0, y: 16 }}
+        animate={{ scale: 1,    opacity: 1, y: 0  }}
+        exit={{ scale: 0.94,    opacity: 0, y: 16 }}
+        transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#e2f0f7", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+              {chart.title}
+            </h2>
+            <p style={{ margin: "4px 0 0", fontSize: 11, color: "#2a4a5e", fontStyle: "italic" }}>
+              {chart.subtitle}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "#071624", border: "1px solid #0a2540",
+              color: "#5a8a9f", borderRadius: 10,
+              width: 32, height: 32, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 16, flexShrink: 0,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Línea divisora */}
+        <div style={{ height: 1, background: "linear-gradient(to right, transparent, #00e5c330, transparent)", marginBottom: 20 }} />
+
+        {/* Device legend pills */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+          {Object.entries(DEVICES).map(([id, cfg]) => {
+            const dev_history = history.filter(r => r.id === id);
+            const last = dev_history[dev_history.length - 1];
+            const val  = last?.[chart.dataKey];
+            const status = getStatus(chart.dataKey, val);
+            const sc = STATUS_COLOR[status];
+            return (
+              <div key={id} style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "5px 12px", borderRadius: 999,
+                background: `${cfg.color}10`, border: `1px solid ${cfg.color}25`,
+              }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: cfg.color }} />
+                <span style={{ fontSize: 11, color: cfg.color, fontWeight: 600 }}>{cfg.label}</span>
+                {val != null && (
+                  <>
+                    <span style={{ fontSize: 13, fontFamily: "ui-monospace,monospace", color: sc, fontWeight: 700 }}>
+                      {val.toFixed(2)}{chart.unit}
+                    </span>
+                    <span style={{ fontSize: 9, color: sc, fontWeight: 700, letterSpacing: "0.08em" }}>{status}</span>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          <div style={{ marginLeft: "auto", fontSize: 10, color: "#2a4a5e", alignSelf: "center" }}>
+            Zona óptima entre líneas naranjas
+          </div>
+        </div>
+
+        {/* Chart grande */}
+        <ResponsiveContainer width="100%" height={window.innerHeight < 600 ? 260 : 420}>
+          <AreaChart margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+            <defs>
+              {Object.entries(DEVICES).map(([id, cfg]) => (
+                <linearGradient key={id} id={`mc-${id}-${chart.dataKey}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={cfg.color} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={cfg.color} stopOpacity={0}   />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#071624" />
+            <XAxis dataKey="time" tickFormatter={TICK_FMT}
+              tick={{ fill: "#2a4a5e", fontSize: 10 }} minTickGap={30} allowDuplicatedCategory={false} />
+            <YAxis domain={chart.domain} tick={{ fill: "#2a4a5e", fontSize: 10 }} width={36} />
+            <Tooltip
+              contentStyle={{
+                background: "#050f1a", border: "1px solid #0a2540",
+                borderRadius: 12, fontSize: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+              }}
+              labelFormatter={v => new Date(v).toLocaleTimeString("es-CO", {
+                hour: "2-digit", minute: "2-digit", second: "2-digit",
+              })}
+              formatter={(v, name) => [`${v?.toFixed(2)}${chart.unit}`, DEVICES[name]?.label ?? name]}
+            />
+            <Legend wrapperStyle={{ fontSize: 11, color: "#5a8a9f" }}
+              formatter={n => DEVICES[n]?.label ?? n} />
+            {chart.refLines.map(y => (
+              <ReferenceLine key={y} y={y} stroke="#f59e0b" strokeDasharray="5 4" strokeOpacity={0.45} />
+            ))}
+            {Object.entries(DEVICES).map(([id, cfg]) => (
+              <Area key={id}
+                data={history.filter(r => r.id === id)}
+                type="monotone" dataKey={chart.dataKey} name={id}
+                stroke={cfg.color} fill={`url(#mc-${id}-${chart.dataKey})`}
+                strokeWidth={2.5} dot={false} isAnimationActive={false}
+              />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── SensorChart ─────────────────────────────────────────────────────────────
-function SensorChart({ title, subtitle, dataKey, unit, domain, refLines, history }) {
+function SensorChart({ title, subtitle, dataKey, unit, domain, refLines, history, onExpand }) {
   return (
     <div style={{
       background: "rgba(5,15,26,0.8)", border: "1px solid #071624",
       borderRadius: 20, padding: 20,
     }}>
-      <div style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 11, color: "#5a8a9f", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          {title}
-        </h3>
-        <p style={{ margin: "3px 0 0", fontSize: 10, color: "#2a4a5e", fontStyle: "italic" }}>
-          {subtitle}
-        </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 11, color: "#5a8a9f", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {title}
+          </h3>
+          <p style={{ margin: "3px 0 0", fontSize: 10, color: "#2a4a5e", fontStyle: "italic" }}>
+            {subtitle}
+          </p>
+        </div>
+        <motion.button
+          onClick={onExpand}
+          whileHover={{ scale: 1.1, color: "#00e5c3" }}
+          whileTap={{ scale: 0.9 }}
+          style={{
+            background: "none", border: "1px solid #0a2540",
+            color: "#2a4a5e", borderRadius: 8,
+            width: 28, height: 28, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, fontSize: 14,
+          }}
+          title="Expandir gráfica"
+        >
+          ⤢
+        </motion.button>
       </div>
 
       <ResponsiveContainer width="100%" height={220}>
@@ -468,11 +626,12 @@ function EventLog({ log }) {
 
 // ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [devices, setDevices]     = useState({});
-  const [history, setHistory]     = useState([]);
-  const [connected, setConnected] = useState(false);
-  const [log, setLog]             = useState([]);
-  const [temp, setTemp]           = useState("25.0");
+  const [devices, setDevices]         = useState({});
+  const [history, setHistory]         = useState([]);
+  const [connected, setConnected]     = useState(false);
+  const [log, setLog]                 = useState([]);
+  const [temp, setTemp]               = useState("25.0");
+  const [expandedChart, setExpanded]  = useState(null);
   const ws = useRef(null);
 
   const addLog = msg =>
@@ -649,12 +808,14 @@ export default function App() {
                 subtitle="Potencial de Hidrógeno"
                 dataKey="pH" unit=""
                 domain={[5, 10]} refLines={[7.0, 8.5]} history={history}
+                onExpand={() => setExpanded({ title: "pH · últimas 24h", subtitle: "Potencial de Hidrógeno", dataKey: "pH", unit: "", domain: [5, 10], refLines: [7.0, 8.5] })}
               />
               <SensorChart
                 title="Oxígeno Disuelto · últimas 24h"
                 subtitle="O₂ disuelto en agua"
                 dataKey="DO" unit=" mg/L"
                 domain={[0, 16]} refLines={[6, 12]} history={history}
+                onExpand={() => setExpanded({ title: "Oxígeno Disuelto · últimas 24h", subtitle: "O₂ disuelto en agua", dataKey: "DO", unit: " mg/L", domain: [0, 16], refLines: [6, 12] })}
               />
             </div>
           </motion.section>
@@ -700,6 +861,17 @@ export default function App() {
 
         </motion.div>
       </div>
+
+      {/* ── Chart modal ── */}
+      <AnimatePresence>
+        {expandedChart && (
+          <ChartModal
+            chart={expandedChart}
+            history={history}
+            onClose={() => setExpanded(null)}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }
