@@ -702,7 +702,7 @@ export default function App() {
               <AlgaeIcon />
               <div>
                 <h1 style={{ margin: 0, fontSize: "clamp(17px,2.5vw,22px)", fontWeight: 700, letterSpacing: "-0.02em", color: "#e2f0f7" }}>
-                  Algae Monitor
+                  Sensores pH + OD
                 </h1>
                 <p style={{ margin: "2px 0 0", fontSize: 11, color: "#2a4a5e" }}>
                   pH + Oxígeno Disuelto · Tratamiento de aguas residuales
