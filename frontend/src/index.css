@@ -1,5 +1,53 @@
 @import "tailwindcss";
 
+@theme {
+  --color-void:   #020b12;
+  --color-abyss:  #050f1a;
+  --color-deep:   #071624;
+  --color-current:#0a2540;
+  --color-foam:   #0d3b5e;
+  --color-biolume:#00e5c3;
+  --color-tide:   #0891b2;
+  --color-text:   #e2f0f7;
+  --color-muted:  #5a8a9f;
+  --color-dim:    #2a4a5e;
+}
+
 * { box-sizing: border-box; }
 body { margin: 0; }
 #root { min-height: 100vh; }
+
+body {
+  background-color: #020b12;
+  background-image:
+    radial-gradient(ellipse 70% 55% at 15% 10%, #07162455 0%, transparent 65%),
+    radial-gradient(ellipse 50% 40% at 85% 85%, #00e5c308 0%, transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Burbujas flotantes */
+@keyframes rise {
+  0%   { transform: translateY(0) scale(1);    opacity: 0;   }
+  8%   { opacity: 1; }
+  92%  { opacity: 0.5; }
+  100% { transform: translateY(-115vh) scale(0.75); opacity: 0; }
+}
+
+.bubble {
+  animation: rise linear infinite;
+  will-change: transform, opacity;
+}
+
+/* Badge CRÍTICO pulsa suavemente */
+@keyframes badge-pulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.09); }
+}
+.badge-critical {
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble         { animation: none !important; }
+  .badge-critical { animation: none !important; }
+}
