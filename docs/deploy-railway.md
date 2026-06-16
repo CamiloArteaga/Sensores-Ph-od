@@ -3,8 +3,8 @@
 ## Requisitos previos
 
 - Cuenta en [railway.app](https://railway.app) (free tier suficiente)
-- `gh` CLI autenticado con cuenta `Nicoej99`
-- Repo `Nicoej99/sensores-algas-marinas` ya en GitHub
+- `gh` CLI autenticado con cuenta `CamiloArteaga`
+- Repo `CamiloArteaga/Sensores-Ph-od` ya en GitHub
 
 ---
 
@@ -12,7 +12,7 @@
 
 1. Ir a [railway.app/new](https://railway.app/new)
 2. **Deploy from GitHub repo**
-3. Seleccionar `Nicoej99/sensores-algas-marinas`
+3. Seleccionar `CamiloArteaga/Sensores-Ph-od`
 4. Railway detecta el repo — NO hacer deploy todavía
 
 ---
@@ -47,7 +47,7 @@ Guardar y hacer deploy.
 
 Railway asigna una URL tipo:
 ```
-https://sensores-algas-marinas-production.railway.app
+https://sensores-ph-od-production.railway.app
 ```
 
 Copiar esa URL.
@@ -64,7 +64,7 @@ cp .env.example .env
 Editar `pusher/.env`:
 ```
 SERIAL_PORT=COM3
-CLOUD_URL=https://sensores-algas-marinas-production.railway.app
+CLOUD_URL=https://sensores-ph-od-production.railway.app
 DEVICE_ID=piscina_1
 API_KEY=algas-2026-abc123   # la misma que pusiste en Railway
 POLL_INTERVAL=2
@@ -84,10 +84,10 @@ Con la URL fija de Railway, actualizar el secret de GitHub **una sola vez**:
 
 ```bash
 gh secret set VITE_API_URL \
-  --body "https://sensores-algas-marinas-production.railway.app" \
-  --repo Nicoej99/sensores-algas-marinas
+  --body "https://sensores-ph-od-production.railway.app" \
+  --repo CamiloArteaga/Sensores-Ph-od
 
-gh workflow run deploy.yml --repo Nicoej99/sensores-algas-marinas
+gh workflow run deploy.yml --repo CamiloArteaga/Sensores-Ph-od
 ```
 
 Después de ~2 minutos el dashboard en GitHub Pages apunta al backend en Railway.
@@ -98,7 +98,7 @@ Ya no se necesita el túnel Cloudflare (`start_tunnel.sh`).
 ## Verificación
 
 ```bash
-BASE=https://sensores-algas-marinas-production.railway.app
+BASE=https://sensores-ph-od-production.railway.app
 
 # Estado del backend
 curl $BASE/api/status

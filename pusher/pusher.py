@@ -5,7 +5,7 @@ Runs on your local PC today; drop it on a Raspberry Pi for production.
 Config via environment variables (or a .env file):
   SERIAL_PORT   COM3          (Windows) or /dev/ttyUSB0 (Linux/RPi)
   CLOUD_URL     https://your-app.railway.app
-  DEVICE_ID     piscina_1
+  DEVICE_ID     pH_DO_1
   API_KEY       same key set in Railway env vars
   POLL_INTERVAL 2             seconds between command polls
 """
