@@ -10,7 +10,7 @@ Mide pH, oxígeno disuelto (DO) y temperatura. Dashboard web accesible desde cua
 | Arduino Uno + sensor H-101 (pH/DO/temp) | Funcionando en COM3 | Hardware local |
 | `pusher/pusher.py` | Listo para usar | PC local / Raspberry Pi |
 | `backend/` FastAPI | **Pendiente deploy** | Railway (cloud) |
-| `frontend/` React dashboard | Live en GitHub Pages | [ver dashboard](https://nicoej99.github.io/sensores-algas-marinas/) |
+| `frontend/` React dashboard | Live en GitHub Pages | [ver dashboard](https://camiloarteaga.github.io/Sensores-Ph-od/) |
 
 > El backend aún no está en Railway — ver `docs/deploy-railway.md` para completar el deploy.
 
@@ -73,7 +73,7 @@ npm run dev
 
 | Sensor | Modelo | Device ID | Puerto |
 |---|---|---|---|
-| pH + DO + Temp | DFRobot / HAOSHI H-101 | `piscina_1` | COM3 (Windows) / `/dev/ttyUSB0` (RPi) |
+| pH + DO + Temp | DFRobot / HAOSHI H-101 | `pH_DO_1` | COM3 (Windows) / `/dev/ttyUSB0` (RPi) |
 
 ### Calibración pH (DFRobot_PH library)
 
