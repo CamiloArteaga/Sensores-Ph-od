@@ -1,4 +1,4 @@
-# Algae Monitor
+# Algas Monitor
 
 Monitor de calidad de agua en tiempo real para cultivos de algas marinas.
 Mide pH, oxígeno disuelto (DO) y temperatura. Dashboard web accesible desde cualquier dispositivo.
