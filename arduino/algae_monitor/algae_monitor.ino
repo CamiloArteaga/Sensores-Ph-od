@@ -1,14 +1,20 @@
 // algae_monitor.ino
-// Arduino 1: pH (HAOSHI H-101 + DFRobot board) + Dissolved Oxygen
-// A0 = pH sensor (H-101)
-// A1 = DO sensor (DFRobot SEN0237)
+// Arduino Uno: pH (H-101 + DFRobot board) + DO (SEN0237) + Temperatura (MAX6675)
+//
+// Analog:  A0 = pH  |  A1 = DO
+// SPI:     D13=SCK  |  D12=SO(MISO)  |  D10=CS
 
 #include <DFRobot_PH.h>
 #include <EEPROM.h>
+#include <max6675.h>
 
-#define PH_PIN A0
-#define DO_PIN A1
-#define DEVICE_ID "pH_DO_1"  // Arduino 1: H-101 electrode + DO sensor
+#define PH_PIN      A0
+#define DO_PIN      A1
+#define MAX_SCK     13
+#define MAX_CS      10
+#define MAX_SO      12
+#define DEVICE_ID   "pH_DO_1"
+#define DO_CAL_ADDR 40
 
 const uint16_t DO_Table[41] = {
   14460, 14220, 13820, 13440, 13090, 12740, 12420, 12110, 11810, 11530,
@@ -17,9 +23,8 @@ const uint16_t DO_Table[41] = {
    7560,  7430,  7300,  7180,  7070,  6950,  6840,  6730,  6630,  6530, 6410
 };
 
-#define DO_CAL_ADDR 40
-
-DFRobot_PH ph;
+DFRobot_PH thermocouple_ph;
+MAX6675    thermocouple(MAX_SCK, MAX_CS, MAX_SO);
 
 float temperature  = 25.0;
 float doCalVoltage = 1600.0;
@@ -28,10 +33,11 @@ float doVoltage, doValue;
 
 void setup() {
   Serial.begin(9600);
-  ph.begin();
+  thermocouple_ph.begin();
   EEPROM.get(DO_CAL_ADDR, doCalVoltage);
   if (isnan(doCalVoltage) || doCalVoltage < 500 || doCalVoltage > 4500)
     doCalVoltage = 1600.0;
+  delay(500); // MAX6675 necesita 500ms para estabilizarse
 }
 
 void loop() {
@@ -42,6 +48,7 @@ void loop() {
     cmd.trim();
 
     if (cmd.startsWith("TEMP:")) {
+      // Override manual si el MAX6675 no está conectado
       temperature = cmd.substring(5).toFloat();
     } else if (cmd == "DOCAL") {
       doCalVoltage = analogRead(DO_PIN) / 1024.0 * 5000.0;
@@ -51,19 +58,25 @@ void loop() {
       Serial.println("}");
       return;
     } else if (cmd == "ENTERPH") {
-      ph.calibration(phVoltage, temperature, "enterph");
+      thermocouple_ph.calibration(phVoltage, temperature, "enterph");
     } else if (cmd == "CALPH") {
-      ph.calibration(phVoltage, temperature, "calph");
+      thermocouple_ph.calibration(phVoltage, temperature, "calph");
     } else if (cmd == "EXITPH") {
-      ph.calibration(phVoltage, temperature, "exitph");
+      thermocouple_ph.calibration(phVoltage, temperature, "exitph");
     }
   }
 
   if (millis() - lastRead >= 2000) {
     lastRead = millis();
 
+    // Leer MAX6675 — si no hay termopar conectado devuelve NAN, se queda el valor anterior
+    float tRead = thermocouple.readCelsius();
+    if (!isnan(tRead) && tRead > -10.0 && tRead < 100.0) {
+      temperature = tRead;
+    }
+
     phVoltage = analogRead(PH_PIN) / 1024.0 * 5000.0;
-    phValue   = ph.readPH(phVoltage, temperature);
+    phValue   = thermocouple_ph.readPH(phVoltage, temperature);
 
     doVoltage = analogRead(DO_PIN) / 1024.0 * 5000.0;
     uint8_t t = (uint8_t)constrain((int)temperature, 0, 40);
