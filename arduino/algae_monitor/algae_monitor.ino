@@ -15,6 +15,7 @@
 #define MAX_SO      12
 #define DEVICE_ID   "pH_DO_1"
 #define DO_CAL_ADDR 40
+#define READ_MS     1000   // lectura cada 1 segundo
 
 const uint16_t DO_Table[41] = {
   14460, 14220, 13820, 13440, 13090, 12740, 12420, 12110, 11810, 11530,
@@ -23,7 +24,7 @@ const uint16_t DO_Table[41] = {
    7560,  7430,  7300,  7180,  7070,  6950,  6840,  6730,  6630,  6530, 6410
 };
 
-DFRobot_PH thermocouple_ph;
+DFRobot_PH ph;
 MAX6675    thermocouple(MAX_SCK, MAX_CS, MAX_SO);
 
 float temperature  = 25.0;
@@ -31,13 +32,20 @@ float doCalVoltage = 1600.0;
 float phVoltage, phValue;
 float doVoltage, doValue;
 
+void sendEvent(const char* event, const char* detail = "") {
+  Serial.print("{\"event\":\""); Serial.print(event);
+  Serial.print("\",\"id\":\"");  Serial.print(DEVICE_ID);
+  if (detail[0]) { Serial.print("\",\"msg\":\""); Serial.print(detail); }
+  Serial.println("\"}");
+}
+
 void setup() {
   Serial.begin(9600);
-  thermocouple_ph.begin();
+  ph.begin();
   EEPROM.get(DO_CAL_ADDR, doCalVoltage);
   if (isnan(doCalVoltage) || doCalVoltage < 500 || doCalVoltage > 4500)
     doCalVoltage = 1600.0;
-  delay(500); // MAX6675 necesita 500ms para estabilizarse
+  delay(500);
 }
 
 void loop() {
@@ -48,35 +56,47 @@ void loop() {
     cmd.trim();
 
     if (cmd.startsWith("TEMP:")) {
-      // Override manual si el MAX6675 no está conectado
       temperature = cmd.substring(5).toFloat();
+      sendEvent("TEMP_SET", cmd.c_str());
+
+    } else if (cmd == "ENTERPH") {
+      ph.calibration(phVoltage, temperature, "enterph");
+      sendEvent("PH_CAL_START", "coloca electrodo en buffer pH 7");
+
+    } else if (cmd == "CALPH") {
+      ph.calibration(phVoltage, temperature, "calph");
+      sendEvent("PH_CAL_POINT", "punto registrado");
+
+    } else if (cmd == "EXITPH") {
+      ph.calibration(phVoltage, temperature, "exitph");
+      sendEvent("PH_CAL_SAVED", "calibracion guardada en EEPROM");
+
     } else if (cmd == "DOCAL") {
       doCalVoltage = analogRead(DO_PIN) / 1024.0 * 5000.0;
       EEPROM.put(DO_CAL_ADDR, doCalVoltage);
       Serial.print("{\"event\":\"DO_CAL\",\"id\":\""); Serial.print(DEVICE_ID);
       Serial.print("\",\"v\":"); Serial.print(doCalVoltage, 1);
       Serial.println("}");
-      return;
-    } else if (cmd == "ENTERPH") {
-      thermocouple_ph.calibration(phVoltage, temperature, "enterph");
-    } else if (cmd == "CALPH") {
-      thermocouple_ph.calibration(phVoltage, temperature, "calph");
-    } else if (cmd == "EXITPH") {
-      thermocouple_ph.calibration(phVoltage, temperature, "exitph");
+
+    } else if (cmd == "RESETCAL") {
+      // Borra calibracion de pH de EEPROM para empezar de cero
+      for (int i = 0; i < 40; i++) EEPROM.write(i, 0xFF);
+      doCalVoltage = 1600.0;
+      EEPROM.put(DO_CAL_ADDR, doCalVoltage);
+      ph.begin(); // reinicia con EEPROM limpia
+      sendEvent("CAL_RESET", "EEPROM borrada");
     }
   }
 
-  if (millis() - lastRead >= 2000) {
+  if (millis() - lastRead >= READ_MS) {
     lastRead = millis();
 
-    // Leer MAX6675 — si no hay termopar conectado devuelve NAN, se queda el valor anterior
     float tRead = thermocouple.readCelsius();
-    if (!isnan(tRead) && tRead > -10.0 && tRead < 100.0) {
+    if (!isnan(tRead) && tRead > -10.0 && tRead < 100.0)
       temperature = tRead;
-    }
 
     phVoltage = analogRead(PH_PIN) / 1024.0 * 5000.0;
-    phValue   = thermocouple_ph.readPH(phVoltage, temperature);
+    phValue   = ph.readPH(phVoltage, temperature);
 
     doVoltage = analogRead(DO_PIN) / 1024.0 * 5000.0;
     uint8_t t = (uint8_t)constrain((int)temperature, 0, 40);

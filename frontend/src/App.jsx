@@ -659,10 +659,11 @@ function CalibrationModal({ onClose, onCmd }) {
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
 
-  const [device,  setDevice]  = useState("all");
-  const [phStep,  setPhStep]  = useState(-1);   // -1 = no iniciado
-  const [doDone,  setDoDone]  = useState(false);
-  const [sending, setSending] = useState(false);
+  const [device,   setDevice]   = useState("all");
+  const [phStep,   setPhStep]   = useState(-1);   // -1 = no iniciado
+  const [doDone,   setDoDone]   = useState(false);
+  const [sending,  setSending]  = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const send = async cmd => {
     setSending(true);
@@ -899,6 +900,37 @@ function CalibrationModal({ onClose, onCmd }) {
               </button>
             )}
           </div>
+        </div>
+
+        {/* ── Reset calibración (zona peligrosa) ── */}
+        <div style={{ borderTop: "1px solid #1a0a0a", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontSize: 10, color: "#ef444460", textTransform: "uppercase", letterSpacing: "0.12em" }}>
+            Resetear calibración
+          </span>
+          <p style={{ margin: 0, fontSize: 11, color: "#5a8a9f", lineHeight: 1.5 }}>
+            Borra los datos de calibración de la EEPROM. Usá esto si la lectura sigue incorrecta después de calibrar.
+          </p>
+          <motion.button
+            onClick={async () => {
+              setResetting(true);
+              await send("RESETCAL");
+              setPhStep(-1);
+              setDoDone(false);
+              setResetting(false);
+            }}
+            disabled={resetting || sending}
+            whileHover={{ scale: resetting ? 1 : 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            style={{
+              alignSelf: "flex-start",
+              padding: "7px 18px", borderRadius: 10, fontSize: 12, fontWeight: 700,
+              cursor: resetting ? "wait" : "pointer",
+              background: "#ef444412", border: "1px solid #ef444430", color: "#ef4444",
+              opacity: resetting || sending ? 0.5 : 1,
+            }}
+          >
+            {resetting ? "Reseteando..." : "Limpiar EEPROM y empezar de cero"}
+          </motion.button>
         </div>
 
       </motion.div>
