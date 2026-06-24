@@ -120,7 +120,7 @@ void loop() {
     lastRead = millis();
 
     float tRead = thermocouple.readCelsius();
-    if (!isnan(tRead) && tRead > -10.0 && tRead < 100.0)
+    if (!isnan(tRead) && tRead > 5.0 && tRead < 60.0)
       temperature = tRead;
 
     phVoltage = readPhVoltage();
@@ -134,6 +134,7 @@ void loop() {
     Serial.print("\",\"pH\":");   Serial.print(phValue, 2);
     Serial.print(",\"DO\":");     Serial.print(doValue, 2);
     Serial.print(",\"temp\":");   Serial.print(temperature, 1);
+    Serial.print(",\"tc\":");     Serial.print(isnan(tRead) ? -999.0 : tRead, 1);
     Serial.print(",\"ts\":");     Serial.print(millis());
     Serial.println("}");
   }
