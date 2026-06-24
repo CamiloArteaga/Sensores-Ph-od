@@ -624,320 +624,7 @@ function EventLog({ log }) {
   );
 }
 
-// ── CalibrationModal ─────────────────────────────────────────────────────────
-const PH_STEPS = [
-  {
-    cmd:         "ENTERPH",
-    title:       "Iniciar modo calibración",
-    instruction: "Enjuagá el electrodo con agua destilada y sumergilo en buffer pH 7.0. Esperá 5 minutos hasta que la lectura se estabilice.",
-    btn:         "Entrar a calibración",
-  },
-  {
-    cmd:         "CALPH",
-    title:       "Registrar punto pH 7",
-    instruction: "La lectura debería estar estable. Presioná para registrar el primer punto de calibración.",
-    btn:         "Registrar pH 7",
-  },
-  {
-    cmd:         "CALPH",
-    title:       "Punto pH 4 (opcional)",
-    instruction: "Enjuagá el electrodo. Sumergilo en buffer pH 4.0. Esperá 2 minutos.",
-    btn:         "Registrar pH 4",
-  },
-  {
-    cmd:         "EXITPH",
-    title:       "Guardar en EEPROM",
-    instruction: "La calibración quedará guardada en la memoria del Arduino, incluso si se apaga.",
-    btn:         "Guardar y finalizar",
-  },
-];
-
-function CalibrationModal({ onClose, onCmd }) {
-  useEffect(() => {
-    const h = e => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
-
-  const [device,   setDevice]   = useState("all");
-  const [phStep,   setPhStep]   = useState(-1);   // -1 = no iniciado
-  const [doDone,   setDoDone]   = useState(false);
-  const [sending,  setSending]  = useState(false);
-  const [resetting, setResetting] = useState(false);
-
-  const send = async cmd => {
-    setSending(true);
-    const targets = device === "all" ? Object.keys(DEVICES) : [device];
-    for (const id of targets) await onCmd(cmd, id);
-    setSending(false);
-  };
-
-  const phDone       = phStep >= PH_STEPS.length - 1;
-  const currentStep  = phStep >= 0 ? PH_STEPS[phStep] : null;
-  const nextStep     = !phDone ? PH_STEPS[phStep + 1] : null;
-
-  const handlePhNext = async () => {
-    if (!nextStep) return;
-    await send(nextStep.cmd);
-    setPhStep(s => s + 1);
-  };
-
-  const CloseBtn = () => (
-    <button
-      onClick={onClose}
-      style={{
-        background: "#071624", border: "1px solid #0a2540",
-        color: "#5a8a9f", borderRadius: 10,
-        width: 32, height: 32, cursor: "pointer", flexShrink: 0,
-        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-      }}
-    >✕</button>
-  );
-
-  const SectionLabel = ({ children, color = "#5a8a9f" }) => (
-    <span style={{ fontSize: 10, color, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700 }}>
-      {children}
-    </span>
-  );
-
-  const ActionBtn = ({ onClick, color, disabled, children }) => (
-    <motion.button
-      onClick={onClick}
-      disabled={disabled}
-      whileHover={{ scale: disabled ? 1 : 1.03 }}
-      whileTap={{ scale: disabled ? 1 : 0.97 }}
-      style={{
-        alignSelf: "flex-start",
-        padding: "8px 20px", borderRadius: 10, fontSize: 12, fontWeight: 700,
-        cursor: disabled ? "wait" : "pointer",
-        background: `${color}18`, border: `1px solid ${color}40`, color,
-        opacity: disabled ? 0.55 : 1,
-      }}
-    >
-      {disabled ? "Enviando..." : children}
-    </motion.button>
-  );
-
-  return (
-    <motion.div
-      style={{
-        position: "fixed", inset: 0, zIndex: 60,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "clamp(12px,3vw,32px)",
-        background: "rgba(2,11,18,0.92)", backdropFilter: "blur(14px)",
-      }}
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <motion.div
-        style={{
-          width: "100%", maxWidth: 520,
-          background: "rgba(5,15,26,0.99)", border: "1px solid #0d3b5e",
-          borderRadius: 24, padding: "clamp(18px,3vw,30px)",
-          boxShadow: "0 24px 80px rgba(0,229,195,0.08), 0 0 0 1px #00e5c310",
-          display: "flex", flexDirection: "column", gap: 22,
-          maxHeight: "90vh", overflowY: "auto",
-        }}
-        initial={{ scale: 0.94, opacity: 0, y: 16 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.94, opacity: 0, y: 16 }}
-        transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-      >
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 20 }}>⚗️</span>
-            <div>
-              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#e2f0f7" }}>
-                Calibración de sensores
-              </h2>
-              <p style={{ margin: "2px 0 0", fontSize: 11, color: "#2a4a5e" }}>
-                pH · Oxígeno disuelto
-              </p>
-            </div>
-          </div>
-          <CloseBtn />
-        </div>
-
-        {/* Device selector */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <SectionLabel>Dispositivo objetivo</SectionLabel>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {[["all", "Todos"], ...Object.entries(DEVICES).map(([id, cfg]) => [id, cfg.label])].map(([id, label]) => (
-              <motion.button
-                key={id}
-                onClick={() => { setDevice(id); setPhStep(-1); setDoDone(false); }}
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
-                style={{
-                  padding: "5px 16px", borderRadius: 999, fontSize: 11, fontWeight: 600,
-                  cursor: "pointer",
-                  ...(device === id
-                    ? { background: "#00e5c320", border: "1px solid #00e5c340", color: "#00e5c3" }
-                    : { background: "#071624",   border: "1px solid #0a2540",   color: "#2a4a5e" }
-                  ),
-                }}
-              >
-                {label}
-              </motion.button>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ height: 1, background: "linear-gradient(to right, transparent, #0d3b5e, transparent)" }} />
-
-        {/* ── pH calibration ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <SectionLabel color="#22c55e">pH</SectionLabel>
-            {phDone && (
-              <span style={{ fontSize: 10, color: "#22c55e", background: "#22c55e12", border: "1px solid #22c55e28", padding: "2px 10px", borderRadius: 999 }}>
-                Calibrado ✓
-              </span>
-            )}
-            {phStep >= 0 && !phDone && (
-              <span style={{ fontSize: 10, color: "#f59e0b" }}>
-                Paso {phStep + 1} / {PH_STEPS.length}
-              </span>
-            )}
-          </div>
-
-          {/* Barra de progreso por pasos */}
-          <div style={{ display: "flex", gap: 4 }}>
-            {PH_STEPS.map((_, i) => (
-              <div key={i} style={{
-                flex: 1, height: 3, borderRadius: 999,
-                background: i <= phStep ? "#22c55e" : "#071624",
-                transition: "background 0.4s",
-              }} />
-            ))}
-          </div>
-
-          {/* Tarjeta de estado actual */}
-          <div style={{
-            background: "#071624", border: "1px solid #0a2540",
-            borderRadius: 14, padding: "14px 16px",
-            display: "flex", flexDirection: "column", gap: 10,
-          }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: phDone ? "#22c55e" : "#e2f0f7" }}>
-              {phDone
-                ? "Calibración completada"
-                : phStep === -1
-                  ? "Lista para iniciar"
-                  : `Paso ${phStep + 1} completado: ${currentStep?.title}`}
-            </span>
-            <p style={{ margin: 0, fontSize: 11, color: "#5a8a9f", lineHeight: 1.65 }}>
-              {phDone
-                ? "La calibración quedó guardada en la EEPROM del Arduino. Sobrevive reinicios."
-                : phStep === -1
-                  ? "Preparate: necesitás buffer pH 7.0 y opcionalmente pH 4.0. Enjuagá bien el electrodo antes de empezar."
-                  : nextStep?.instruction}
-            </p>
-
-            {!phDone && (
-              <ActionBtn onClick={handlePhNext} color="#22c55e" disabled={sending}>
-                {phStep === -1 ? "Iniciar calibración" : nextStep?.btn}
-              </ActionBtn>
-            )}
-          </div>
-
-          {phStep >= 0 && !phDone && (
-            <button
-              onClick={() => setPhStep(-1)}
-              style={{ alignSelf: "flex-start", fontSize: 10, color: "#2a4a5e", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
-            >
-              Reiniciar desde el principio
-            </button>
-          )}
-          {phDone && (
-            <button
-              onClick={() => setPhStep(-1)}
-              style={{ alignSelf: "flex-start", fontSize: 10, color: "#2a4a5e", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
-            >
-              Recalibrar pH
-            </button>
-          )}
-        </div>
-
-        <div style={{ height: 1, background: "linear-gradient(to right, transparent, #0d3b5e, transparent)" }} />
-
-        {/* ── DO calibration ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <SectionLabel color="#0891b2">Oxígeno disuelto (DO)</SectionLabel>
-            {doDone && (
-              <span style={{ fontSize: 10, color: "#0891b2", background: "#0891b212", border: "1px solid #0891b228", padding: "2px 10px", borderRadius: 999 }}>
-                Calibrado ✓
-              </span>
-            )}
-          </div>
-
-          <div style={{
-            background: "#071624", border: "1px solid #0a2540",
-            borderRadius: 14, padding: "14px 16px",
-            display: "flex", flexDirection: "column", gap: 10,
-          }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: doDone ? "#0891b2" : "#e2f0f7" }}>
-              {doDone ? "Calibración DO completada" : "Calibración punto único"}
-            </span>
-            <p style={{ margin: 0, fontSize: 11, color: "#5a8a9f", lineHeight: 1.65 }}>
-              {doDone
-                ? "Voltaje de saturación guardado en EEPROM. El sensor calcula DO relativo a ese punto."
-                : "Sacá el electrodo del agua y exponelo al aire libre (o usá agua saturada de O₂). Esperá 30 segundos y presioná."}
-            </p>
-
-            {!doDone ? (
-              <ActionBtn onClick={async () => { await send("DOCAL"); setDoDone(true); }} color="#0891b2" disabled={sending}>
-                Calibrar DO
-              </ActionBtn>
-            ) : (
-              <button
-                onClick={() => setDoDone(false)}
-                style={{ alignSelf: "flex-start", fontSize: 10, color: "#2a4a5e", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
-              >
-                Recalibrar DO
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* ── Reset calibración (zona peligrosa) ── */}
-        <div style={{ borderTop: "1px solid #1a0a0a", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontSize: 10, color: "#ef444460", textTransform: "uppercase", letterSpacing: "0.12em" }}>
-            Resetear calibración
-          </span>
-          <p style={{ margin: 0, fontSize: 11, color: "#5a8a9f", lineHeight: 1.5 }}>
-            Borra los datos de calibración de la EEPROM. Usá esto si la lectura sigue incorrecta después de calibrar.
-          </p>
-          <motion.button
-            onClick={async () => {
-              setResetting(true);
-              await send("RESETCAL");
-              setPhStep(-1);
-              setDoDone(false);
-              setResetting(false);
-            }}
-            disabled={resetting || sending}
-            whileHover={{ scale: resetting ? 1 : 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            style={{
-              alignSelf: "flex-start",
-              padding: "7px 18px", borderRadius: 10, fontSize: 12, fontWeight: 700,
-              cursor: resetting ? "wait" : "pointer",
-              background: "#ef444412", border: "1px solid #ef444430", color: "#ef4444",
-              opacity: resetting || sending ? 0.5 : 1,
-            }}
-          >
-            {resetting ? "Reseteando..." : "Limpiar EEPROM y empezar de cero"}
-          </motion.button>
-        </div>
-
-      </motion.div>
-    </motion.div>
-  );
-}
-
+// ── PhCalButtons ─────────────────────────────────────────────────────────────
 // ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [devices, setDevices]         = useState({});
@@ -946,7 +633,6 @@ export default function App() {
   const [log, setLog]                 = useState([]);
   const [temp, setTemp]               = useState("25.0");
   const [expandedChart, setExpanded]  = useState(null);
-  const [showCal, setShowCal]         = useState(false);
   const ws = useRef(null);
 
   const addLog = msg =>
@@ -1170,18 +856,31 @@ export default function App() {
                   <CmdBtn onClick={() => sendCmd(`TEMP:${temp}`)}>Set</CmdBtn>
                 </div>
 
-                <motion.button
-                  onClick={() => setShowCal(true)}
-                  whileHover={{ scale: 1.03, backgroundColor: "#00e5c322" }}
-                  whileTap={{ scale: 0.97 }}
-                  style={{
-                    padding: "9px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700,
-                    cursor: "pointer", letterSpacing: "0.02em",
-                    background: "#00e5c314", border: "1px solid #00e5c335", color: "#00e5c3",
-                  }}
-                >
-                  ⚗️ Calibrar sensores
-                </motion.button>
+                {/* pH: 3 botones directos — el Arduino hace el ciclo completo */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 10, color: "#2a4a5e", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                    Calibrar pH
+                  </span>
+                  <CmdBtn onClick={() => sendCmd("RESETCAL")} color="#ef4444">
+                    Borrar EEPROM
+                  </CmdBtn>
+                  <CmdBtn onClick={() => sendCmd("CAL7")} color="#22c55e">
+                    Calibrar pH 7
+                  </CmdBtn>
+                  <CmdBtn onClick={() => sendCmd("CAL4")} color="#f59e0b">
+                    Calibrar pH 4
+                  </CmdBtn>
+                </div>
+
+                {/* DO: un solo botón */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 10, color: "#2a4a5e", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                    Calibrar DO
+                  </span>
+                  <CmdBtn onClick={() => sendCmd("DOCAL")} color="#0891b2">
+                    Cal. oxígeno
+                  </CmdBtn>
+                </div>
               </div>
 
               <EventLog log={log} />
@@ -1202,15 +901,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ── Calibration modal ── */}
-      <AnimatePresence>
-        {showCal && (
-          <CalibrationModal
-            onClose={() => setShowCal(false)}
-            onCmd={sendCmd}
-          />
-        )}
-      </AnimatePresence>
     </>
   );
 }
