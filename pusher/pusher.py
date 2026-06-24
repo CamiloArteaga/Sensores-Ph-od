@@ -42,6 +42,18 @@ def ingest(data: dict):
         print(f"[push] error: {e}")
 
 
+def forward_event(data: dict):
+    try:
+        requests.post(
+            f"{CLOUD_URL}/api/event",
+            json=data,
+            headers=HEADERS,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def fetch_commands() -> list[str]:
     try:
         r = requests.get(
@@ -73,6 +85,9 @@ def run():
                             data["id"] = DEVICE_ID
                             ingest(data)
                             print(f"[push] {data}")
+                        else:
+                            forward_event(data)
+                            print(f"[event] {data}")
                     except json.JSONDecodeError:
                         pass
 

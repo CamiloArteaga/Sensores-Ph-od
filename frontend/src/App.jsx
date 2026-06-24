@@ -655,7 +655,7 @@ export default function App() {
       sock.onclose = () => { setConnected(false); addLog("Reconectando..."); setTimeout(connect, 3000); };
       sock.onmessage = e => {
         const data = JSON.parse(e.data);
-        if (data.event) return;
+        if (data.event) { addLog(`[Arduino] ${data.event}${data.msg ? ': ' + data.msg : ''}`); return; }
         const id = data.id || "unknown";
         setDevices(prev => ({ ...prev, [id]: data }));
         setHistory(h => [...h, { ...data, time: data.timestamp }].slice(-720));

@@ -165,6 +165,26 @@ def get_pending(device_id: str, x_api_key: str = Header(default="")):
     return [{"id": r[0], "cmd": r[1]} for r in rows]
 
 
+# ── Events (calibration confirmations from Arduino) ───────────────────────
+
+class EventBody(BaseModel):
+    event: str
+    id:    str
+    msg:   str | None = None
+
+
+@app.post("/api/event")
+async def post_event(body: EventBody, x_api_key: str = Header(default="")):
+    verify_key(x_api_key)
+    data = body.model_dump()
+    for ws in active_ws[:]:
+        try:
+            await ws.send_json(data)
+        except Exception:
+            active_ws.remove(ws)
+    return {"ok": True}
+
+
 # ── WebSocket ──────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")

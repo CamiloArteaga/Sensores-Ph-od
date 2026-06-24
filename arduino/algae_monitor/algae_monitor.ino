@@ -46,16 +46,20 @@ float readPhVoltage() {
 
 void calibratePH(const char* label) {
   float v = readPhVoltage();
-  ph.calibration(v, temperature, "enterph");
-  delay(20);
-  ph.calibration(v, temperature, "calph");
-  delay(20);
-  ph.calibration(v, temperature, "exitph");
-  // Releer con calibración nueva
+  // strupr() de la lib requiere strings mutables — NO pasar literales const
+  char enter[] = "ENTERPH";
+  char cal[]   = "CALPH";
+  char ex[]    = "EXITPH";
+  ph.calibration(v, temperature, enter);
+  delay(50);
+  ph.calibration(v, temperature, cal);
+  delay(50);
+  ph.calibration(v, temperature, ex);
+  delay(100);
   phVoltage = readPhVoltage();
   phValue   = ph.readPH(phVoltage, temperature);
-  char buf[64];
-  snprintf(buf, sizeof(buf), "%s guardado. pH ahora: %.2f", label, phValue);
+  char buf[80];
+  snprintf(buf, sizeof(buf), "%s (%.0fmV) pH=%.2f", label, v, phValue);
   sendEvent("PH_CAL_DONE", buf);
 }
 
