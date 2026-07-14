@@ -3,12 +3,37 @@ import asyncio
 import os
 from datetime import datetime
 from contextlib import asynccontextmanager
+import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 DB_PATH = os.getenv("DB_PATH", "readings.db")
 API_KEY = os.getenv("API_KEY", "")          # set in Railway env vars
+
+# Fase 3 (docs/migration-v2.md): si SUPABASE_URL está seteada, cada lectura
+# también se inserta en la tabla `readings` de Supabase vía PostgREST.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")  # service_role key
+
+
+def push_supabase(row: dict):
+    if not SUPABASE_URL:
+        return
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/readings",
+            json=row,
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Prefer": "return=minimal",
+            },
+            timeout=5,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[supabase] insert error: {e}")
 
 
 def init_db():
@@ -82,6 +107,14 @@ async def ingest(body: IngestBody, x_api_key: str = Header(default="")):
             "INSERT INTO readings (timestamp, device_id, ph, do_mgl, temperature) VALUES (?,?,?,?,?)",
             (data["timestamp"], body.id, body.pH, body.DO, body.temp),
         )
+
+    await asyncio.to_thread(push_supabase, {
+        "timestamp":   data["timestamp"],
+        "device_id":   body.id,
+        "ph":          body.pH,
+        "do_mgl":      body.DO,
+        "temperature": body.temp,
+    })
 
     for ws in active_ws[:]:
         try:
