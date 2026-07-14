@@ -39,16 +39,20 @@ Mide **pH**, **oxígeno disuelto (DO)** y **temperatura**. Dashboard web accesib
 ## Arquitectura del sistema
 
 ```
-Arduino Uno (COM3 / /dev/ttyUSB0)
-   │   Serial JSON @ 9600 baud (cada 1s)
-   ▼
-pusher/pusher.py  ──────►  backend/main.py (FastAPI :8000)
-   │   poll cada 1s              │   SQLite readings.db
-   │   /api/command/pending      │   WebSocket /ws
-   │                             ▼
-   ◄── serial write cmd    frontend/ (React :5173)
-                                     Dashboard en tiempo real
+Arduino Uno #1 (pH_DO_1, COM3)      Arduino Uno #2 (pH_DO_2)
+   │   Serial JSON @ 9600 baud          │   Serial JSON @ 9600 baud
+   ▼                                    ▼
+pusher/pusher.py  ──────────────►  backend/main.py (FastAPI :8000)
+   │   poll cada 1s                     │   SQLite readings.db
+   │   /api/command/pending             │   WebSocket /ws
+   │                                    ▼
+   ◄── serial write cmd           frontend/ (React :5173)
+                                        Dashboard en tiempo real
 ```
+
+**Dos Arduinos independientes**, cada uno con 1 sensor de pH + 1 de DO (no 4 sensores en un solo Arduino): `algae_monitor.ino` (device `pH_DO_1`) y `algae_monitor_2.ino` (device `pH_DO_2`), mismo pinout A0=pH, A1=DO en ambos.
+
+**En progreso:** ensamblaje de un shield PCB propio ("CL-001") que apila sobre cada Arduino Uno sacando 5V/3.3V/GND/Vin/A0-A5 por header, más un módulo **ESP8266MOD** (WiFi) con regulador dedicado **LM1117T** (3.3V) para eventualmente reemplazar o complementar la conexión serial/USB. Detalle completo del hardware y el pinout en [`docs/pcb-cl-001-hardware.md`](docs/pcb-cl-001-hardware.md).
 
 ---
 
@@ -238,8 +242,10 @@ No requiere calibración. El MAX6675 con termocouple tipo K es autocalibrante.
 ```
 Sensores-Ph-od/
 ├── arduino/
-│   └── algae_monitor/
-│       └── algae_monitor.ino      # Sketch principal
+│   ├── algae_monitor/
+│   │   └── algae_monitor.ino      # Sketch Arduino #1 (pH_DO_1) — pH+DO+Temp
+│   └── algae_monitor_2/
+│       └── algae_monitor_2.ino    # Sketch Arduino #2 (pH_DO_2)
 ├── backend/
 │   ├── main.py                    # FastAPI app
 │   ├── requirements.txt
@@ -253,6 +259,10 @@ Sensores-Ph-od/
 │   │   └── App.jsx                # Dashboard React (componente único)
 │   ├── .env                       # Config local (gitignored)
 │   └── package.json
+├── docs/
+│   ├── pcb-cl-001-hardware.md     # Shield PCB CL-001 + expansión WiFi ESP8266
+│   ├── deploy-railway.md          # Guía paso a paso deploy backend en Railway
+│   └── migration-v2.md            # Plan de migración a Raspberry Pi + Supabase
 ├── CLAUDE.md                      # Contexto para agentes IA
 ├── free_com3.ps1                  # Mata MSI Center si bloquea COM3 (Windows)
 └── README.md
@@ -262,7 +272,10 @@ Sensores-Ph-od/
 
 | Componente | Estado |
 |---|---|
-| Arduino + sensores pH/DO/Temp | Funcionando (COM3) |
+| Arduino #1 (pH_DO_1) + sensores pH/DO/Temp | Funcionando (COM3), calibrado |
+| Arduino #2 (pH_DO_2) | Sketch listo, mismo pinout que #1 |
+| Shield PCB CL-001 + WiFi (ESP8266MOD) | **En ensamblaje** — ver `docs/pcb-cl-001-hardware.md` |
 | `pusher/pusher.py` | Listo (corre en PC local) |
-| `backend/` FastAPI | Funcional en local; pendiente deploy en Railway |
+| `backend/` FastAPI | Funcional en local; deploy en Railway documentado en `docs/deploy-railway.md`, pendiente ejecutar |
 | `frontend/` React dashboard | Funcional en local + GitHub Pages |
+| Migración a Raspberry Pi + Supabase (producción 24/7) | Planeada — ver `docs/migration-v2.md`, Raspberry Pi aún no adquirida |

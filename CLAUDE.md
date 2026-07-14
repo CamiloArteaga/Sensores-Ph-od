@@ -8,6 +8,8 @@ Monitor de calidad de agua en tiempo real para cultivos de algas marinas.
 Mide pH, oxígeno disuelto (DO) y temperatura vía Arduino Uno + sensores DFRobot Gravity + MAX6675.
 Los datos fluyen: Arduino → pusher (serial→HTTP) → FastAPI backend → WebSocket → dashboard React.
 
+**Son 2 Arduinos independientes**, no un solo Arduino con 4 sensores: `arduino/algae_monitor/` (device `pH_DO_1`) y `arduino/algae_monitor_2/` (device `pH_DO_2`), mismo pinout en ambos.
+
 ---
 
 ## Hardware físico (no tocar en código sin verificar primero)
@@ -20,7 +22,9 @@ Los datos fluyen: Arduino → pusher (serial→HTTP) → FastAPI backend → Web
 
 Puerto serial: **COM3** en Windows, `/dev/ttyUSB0` en Linux/RPi.
 Baud rate: **9600**.
-Device ID: `pH_DO_1`.
+Device IDs: `pH_DO_1` (Arduino #1), `pH_DO_2` (Arduino #2).
+
+**En ensamblaje:** shield PCB propio "CL-001" (apila sobre cada Arduino Uno, saca 5V/3.3V/GND/Vin/A0-A5 por header) + módulo ESP8266MOD WiFi con regulador LM1117T dedicado. Ver `docs/pcb-cl-001-hardware.md` antes de tocar el pinout o asumir que la conexión es solo por USB/serial.
 
 ---
 
@@ -113,7 +117,9 @@ El pusher distingue ambos tipos y los enruta a endpoints distintos del backend.
 
 **Auth:** `x-api-key` header. En desarrollo local la clave está vacía (no se valida). En producción se setea en Railway env vars.
 
-**Base de datos:** SQLite (`readings.db`). No hay migraciones automáticas — `init_db()` crea las tablas en startup con `CREATE TABLE IF NOT EXISTS`.
+**Base de datos:** SQLite (`readings.db`). No hay migraciones automáticas — `init_db()` crea las tablas en startup con `CREATE TABLE IF NOT EXISTS`. Se pierde en cada redeploy de Railway (SQLite no persiste entre deploys) — migración a Supabase planeada, ver `docs/migration-v2.md`.
+
+**Deploy:** guía paso a paso completa en `docs/deploy-railway.md` (Railway root dir = `backend`, variables `API_KEY` y `DB_PATH`, luego actualizar secret `VITE_API_URL` de GitHub Actions). Aún no ejecutado — el backend corre solo en local por ahora.
 
 ---
 
