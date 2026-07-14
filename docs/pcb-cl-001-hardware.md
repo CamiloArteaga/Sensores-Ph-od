@@ -35,21 +35,25 @@ Mismo mapeo que usan `algae_monitor.ino` y `algae_monitor_2.ino`:
 | Señal A1 (DO) | Blanco |
 | SPI SCK/CS/SO (futuro, MAX6675) | Verde / Azul / Gris |
 
-## Expansión WiFi: ESP8266MOD + LM1117T (planeada, aún sin soldar)
+## Expansión WiFi: ESP8266MOD + LM1117T — **funcionando** (actualizado 2026-07-13)
 
 ### Pines Arduino a usar
 
 | Pin | Uso |
 |---|---|
 | D2 | RX Arduino ← TX ESP8266 (SoftwareSerial) |
-| D3 | TX Arduino → RX ESP8266 (SoftwareSerial, vía divisor de voltaje) |
-| D4 (opcional) | RST del ESP8266, si se quiere resetear por software |
+| **D5** | TX Arduino → RX ESP8266 (SoftwareSerial, vía divisor de voltaje) — **D3 quedó dañado y se movió a D5**, ver `arduino/algae_monitor/algae_monitor.ino` |
 
 CH_PD/EN y GPIO0 del ESP8266 van directo a 3.3V (con pull-up 10kΩ), no consumen
 pin del Arduino.
 
-**Pendiente de decidir:** si el ESP8266 reemplaza el bridge USB serial actual
-(`pusher.py`) o es un canal adicional. Afecta la arquitectura del backend.
+**Decidido:** el ESP8266 (`arduino/esp8266_bridge/esp8266_bridge.ino`) hace dos cosas a la vez, no reemplaza a `pusher.py` sino que agrega un canal de producción independiente:
+1. Sube cada lectura a **Supabase** (tabla `readings` vía PostgREST) una vez por minuto — este es ahora el camino real de producción, sin depender de una PC encendida con `pusher.py`.
+2. Sirve su propia web de calibración en `http://algae.local` (mDNS) con lecturas en vivo a 1 Hz y botones CAL7/CAL4/DOCAL/RESETCAL — reenvía los comandos al Arduino por el mismo enlace serial, sin pasar por Supabase ni por el backend.
+
+`pusher.py` + backend FastAPI + WebSocket siguen funcionando como camino alternativo/de desarrollo local (útil sin WiFi o para debug), y el backend puede opcionalmente también empujar a Supabase si se le configura `SUPABASE_URL`/`SUPABASE_KEY` (ver `docs/migration-v2.md`, Fase 3).
+
+Credenciales WiFi + Supabase del ESP8266 viven en `arduino/esp8266_bridge/secrets.h` (gitignorado). Si ninguna red conocida conecta en 15s, el ESP levanta un portal cautivo `AlgaeMonitor-Setup` para agregar una red nueva sin reflashear.
 
 ### LM1117T — regulador dedicado para el ESP8266
 
@@ -68,14 +72,14 @@ máximo ~3.6V. La línea RX(ESP)→RX(Arduino) no necesita divisor (3.3V ya se
 lee como HIGH en el Arduino).
 
 ```
-Arduino D3 (TX, 5V) ──[ R 1kΩ ]── nodo A ── RX del ESP8266
+Arduino D5 (TX, 5V) ──[ R 1kΩ ]── nodo A ── RX del ESP8266
                                      │
                                [ R 2.2kΩ ]
                                      │
                                     GND
 ```
 
-- R1 = 1kΩ, en serie entre D3 y el nodo A
+- R1 = 1kΩ, en serie entre D5 y el nodo A
 - R2 = 2.2kΩ, entre el nodo A y GND
 - Vout = 5V × 2.2kΩ / (1kΩ + 2.2kΩ) ≈ 3.44V — seguro para el RX del ESP8266
 - Las resistencias no tienen polaridad: el lado físico no importa, solo el
@@ -83,9 +87,10 @@ Arduino D3 (TX, 5V) ──[ R 1kΩ ]── nodo A ── RX del ESP8266
 
 ## Checklist de continuación
 
+- [x] Divisor de voltaje (1kΩ + 2.2kΩ) soldado y funcionando (movido de D3 a D5 por daño en D3)
+- [x] ESP8266 sube a Supabase y sirve web de calibración — funcionando
+- [x] Arquitectura definida: ESP8266 es canal adicional de producción, no reemplaza `pusher.py`
 - [ ] Terminar de soldar conectores pH (A0) y DO (A1) sobre la CL-001
 - [ ] Verificar continuidad de los 2 GND compartidos
-- [ ] Soldar divisor de voltaje (1kΩ + 2.2kΩ) antes del RX del ESP8266
-- [ ] Soldar LM1117T-3.3 + capacitores 10µF para alimentar el ESP8266
-- [ ] Definir arquitectura: ¿ESP8266 reemplaza `pusher.py` o es canal adicional?
+- [ ] Soldar LM1117T-3.3 + capacitores 10µF para alimentar el ESP8266 (confirmar si ya se hizo — el ESP8266 ya funciona con WiFi estable, revisar si sigue corriendo del regulador 3.3V nativo del Arduino o ya del LM1117T)
 - [ ] Diseñar siguiente revisión de PCB con pads D10/D12/D13 para MAX6675

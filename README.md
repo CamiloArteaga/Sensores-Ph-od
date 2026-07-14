@@ -38,21 +38,30 @@ Mide **pH**, **oxígeno disuelto (DO)** y **temperatura**. Dashboard web accesib
 
 ## Arquitectura del sistema
 
-```
-Arduino Uno #1 (pH_DO_1, COM3)      Arduino Uno #2 (pH_DO_2)
-   │   Serial JSON @ 9600 baud          │   Serial JSON @ 9600 baud
-   ▼                                    ▼
-pusher/pusher.py  ──────────────►  backend/main.py (FastAPI :8000)
-   │   poll cada 1s                     │   SQLite readings.db
-   │   /api/command/pending             │   WebSocket /ws
-   │                                    ▼
-   ◄── serial write cmd           frontend/ (React :5173)
-                                        Dashboard en tiempo real
-```
+Hay **dos caminos de datos que funcionan en paralelo**:
 
-**Dos Arduinos independientes**, cada uno con 1 sensor de pH + 1 de DO (no 4 sensores en un solo Arduino): `algae_monitor.ino` (device `pH_DO_1`) y `algae_monitor_2.ino` (device `pH_DO_2`), mismo pinout A0=pH, A1=DO en ambos.
+**Producción (WiFi, sin depender de una PC encendida):**
+```
+Arduino Uno (pH_DO_1) ──SoftwareSerial (D2/D5, divisor 1k/2.2k)──► ESP8266 (WiFi)
+                                                                      │
+                                                    cada 1 min ──►  Supabase (Postgres/PostgREST)
+                                                                      │
+                                                    cada 1 min ◄──  frontend/ (React, lee Supabase directo)
+```
+El ESP8266 (`arduino/esp8266_bridge/`) también sirve su propia mini-web de calibración en `http://algae.local` (mDNS), con lecturas en vivo a 1 Hz y botones CAL7/CAL4/DOCAL/RESETCAL — independiente de Supabase y del backend.
 
-**En progreso:** ensamblaje de un shield PCB propio ("CL-001") que apila sobre cada Arduino Uno sacando 5V/3.3V/GND/Vin/A0-A5 por header, más un módulo **ESP8266MOD** (WiFi) con regulador dedicado **LM1117T** (3.3V) para eventualmente reemplazar o complementar la conexión serial/USB. Detalle completo del hardware y el pinout en [`docs/pcb-cl-001-hardware.md`](docs/pcb-cl-001-hardware.md).
+**Desarrollo local / legacy (por USB):**
+```
+Arduino Uno (COM3) ──Serial JSON @ 9600 baud──► pusher/pusher.py ──► backend/main.py (FastAPI :8000)
+                                                                          │  SQLite + WebSocket /ws
+                                                                          ▼
+                                                                  frontend/ (dev, lee WS o Supabase)
+```
+El backend puede además reenviar cada lectura a Supabase si se configuran `SUPABASE_URL`/`SUPABASE_KEY` (ver `docs/migration-v2.md`).
+
+**Dos Arduinos independientes en el proyecto**, cada uno con 1 sensor de pH + 1 de DO (no 4 sensores en un solo Arduino): `algae_monitor.ino` (device `pH_DO_1`, el que ya tiene el puente ESP8266) y `algae_monitor_2.ino` (device `pH_DO_2`), mismo pinout A0=pH, A1=DO en ambos.
+
+Shield PCB propio ("CL-001") apilado sobre el Arduino Uno #1, con el ESP8266MOD + regulador **LM1117T** (3.3V) ya soldado y funcionando. Detalle completo del hardware y el pinout en [`docs/pcb-cl-001-hardware.md`](docs/pcb-cl-001-hardware.md).
 
 ---
 
@@ -61,39 +70,66 @@ pusher/pusher.py  ──────────────►  backend/main.py
 ### Arduino (`arduino/algae_monitor/algae_monitor.ino`)
 
 **Librerías requeridas** (Arduino IDE → Herramientas → Administrar librerías):
-- `DFRobot_PH` v1.0.0
 - `MAX6675 library` v1.1.0
-- `EEPROM` (incluida en el IDE)
+- `EEPROM` y `SoftwareSerial` (incluidas en el IDE)
 
-**Salida serial** (JSON cada 1 segundo):
+> **Ya no usa `DFRobot_PH`.** La calibración de pH es una recta propia de 2 puntos (ver abajo) — la librería DFRobot asumía un centro fijo en 1500mV y rangos que no calzaban con este board/electrodo.
+
+**Lectura del ADC:** cada muestra de pH/DO promedia 16 lecturas de `analogRead()` para bajar el ruido (`readAnalogMv()`).
+
+**Salida serial** (JSON cada 1 segundo, por USB **y** por SoftwareSerial hacia el ESP8266 al mismo tiempo):
 ```json
-{"id":"pH_DO_1","pH":7.02,"DO":8.23,"temp":23.5,"tc":23.5,"ts":12000}
+{"id":"pH_DO_1","pH":7.02,"DO":8.23,"temp":23.5,"tc":23.5,"phmv":1502,"domv":1598,"v7":1500,"v4":2032,"ts":12000}
 ```
 - `temp`: temperatura usada para cálculos (del MAX6675 si es válida, sino 25.0°C como fallback)
 - `tc`: lectura cruda del MAX6675 (−999 = NaN / desconectado)
+- `phmv`/`domv`: voltaje crudo (mV) de pH y DO — los usa la web de calibración del ESP8266
+- `v7`/`v4`: voltajes de calibración actuales (buffer 7.0 y 4.0) — para verificar que la calibración esté cargada
 - `ts`: millis() desde el último boot
 
-**Comandos seriales** (enviados desde el dashboard):
+**Calibración de pH — recta de 2 puntos propia:** se guarda el voltaje medido en el buffer 7.0 y en el 4.0, y el pH se calcula por interpolación lineal entre esos dos puntos (`computePH()`). Así funciona con cualquier electrodo, sin asumir un centro fijo.
+
+**Comandos seriales** (llegan por USB o por el ESP8266, se procesan igual):
 
 | Comando | Acción |
 |---|---|
-| `CAL7` | Calibra punto pH 7 con el voltaje actual (ciclo completo: enterph → calph → exitph) |
-| `CAL4` | Calibra punto pH 4 con el voltaje actual |
-| `RESETCAL` | Borra EEPROM bytes 0–43, resetea calibración a fábrica |
+| `CAL7` | Guarda el voltaje actual como punto de pH 7.0 |
+| `CAL4` | Guarda el voltaje actual como punto de pH 4.0 |
+| `RESETCAL` | Borra EEPROM bytes 0–39, resetea pH (7.0→1500mV, 4.0→2032mV) y DO (1600mV) a valores de fábrica |
 | `DOCAL` | Guarda voltaje actual del DO como referencia de saturación en aire |
 | `TEMP:xx.x` | Setea temperatura manual (ej: `TEMP:22.5`) |
 
-**Eventos de respuesta** (JSON con campo `event`, van por WebSocket al dashboard):
+**Eventos de respuesta** (JSON con campo `event`, van por USB y por el ESP8266):
 ```json
-{"event":"PH_CAL_DONE","id":"pH_DO_1","msg":"pH 7 (1437mV) pH=7.00"}
+{"event":"PH_CAL_DONE","id":"pH_DO_1","msg":"pH 7 (1502mV) pH=7.00"}
 {"event":"CAL_RESET","id":"pH_DO_1","msg":"EEPROM borrada"}
 {"event":"DO_CAL","id":"pH_DO_1","v":1612.3}
 ```
 
 **EEPROM layout:**
-- Bytes 0–3: `neutralVoltage` (pH 7)
-- Bytes 4–7: `acidVoltage` (pH 4)
+- Bytes 0–3: `phCalV7` (voltaje del buffer pH 7.0, float)
+- Bytes 4–7: `phCalV4` (voltaje del buffer pH 4.0, float)
 - Bytes 40–43: `doCalVoltage`
+
+### ESP8266 (`arduino/esp8266_bridge/esp8266_bridge.ino`)
+
+Puente WiFi entre el Arduino y la nube. Corre en un módulo ESP8266MOD conectado al Arduino por SoftwareSerial (ver pinout en `docs/pcb-cl-001-hardware.md`).
+
+**Librerías requeridas:** `ESP8266WiFi`, `ESP8266WiFiMulti`, `ESP8266HTTPClient`, `ESP8266WebServer`, `ESP8266mDNS`, `WiFiClientSecure`, `ArduinoJson`, `WiFiManager`, `SoftwareSerial`.
+
+**Qué hace:**
+1. Se conecta a una de las redes WiFi conocidas (`secrets.h`, gitignorado); si ninguna conecta en 15s, levanta un portal cautivo `AlgaeMonitor-Setup` para agregar una red nueva sin reflashear.
+2. Sube la lectura más reciente del Arduino a Supabase (tabla `readings` vía PostgREST) una vez por minuto.
+3. Sirve una web de calibración en `http://algae.local` (mDNS) o por IP — lecturas en vivo a 1 Hz (`GET /live`) y botones que reenvían `CAL7`/`CAL4`/`DOCAL`/`RESETCAL` al Arduino (`GET /cmd?c=...`), sin pasar por Supabase ni por el backend.
+
+**Archivo `secrets.h` requerido** (no versionado, crear manualmente):
+```cpp
+struct { const char* ssid; const char* pass; } WIFI_CREDENTIALS[] = {
+  {"MiRed", "miPassword"},
+};
+const char* SUPABASE_HOST = "TU-PROYECTO.supabase.co";
+const char* SUPABASE_KEY  = "service_role_key_aqui";  // clave con permiso de INSERT
+```
 
 ### Backend (`backend/main.py`)
 
@@ -143,8 +179,9 @@ cd Sensores-Ph-od
 
 ### 2. Instalar librerías Arduino
 Arduino IDE → Herramientas → Administrar librerías:
-- `DFRobot_PH` (v1.0.0)
 - `MAX6675 library` (v1.1.0)
+
+Si además vas a compilar el puente ESP8266 (`arduino/esp8266_bridge/`), instalar también: `ESP8266WiFi`, `ESP8266WiFiMulti`, `ESP8266HTTPClient`, `ESP8266WebServer`, `ESP8266mDNS`, `WiFiClientSecure`, `ArduinoJson`, `WiFiManager` (todas vía el gestor de librerías, con soporte de placas ESP8266 instalado).
 
 ### 3. Cargar el sketch en el Arduino
 ```bash
@@ -195,28 +232,28 @@ npm run dev
 
 ## Procedimiento de calibración
 
-### pH (en este orden estricto)
+Se puede calibrar desde **dos lugares equivalentes** (mandan el mismo comando al Arduino): el dashboard React (`/api/command`) o la web del ESP8266 en `http://algae.local` — esta última es más simple para calibrar in-situ desde el celular, sin depender del backend.
 
-1. **Borrar EEPROM** — presionar "Borrar EEPROM" en el dashboard
-2. **Buffer pH 7** — sumergir el electrodo, esperar 2 min a que se estabilice, presionar "Calibrar pH 7"
-3. **Buffer pH 4** — enjuagar el electrodo, sumergir en buffer 4, esperar 2 min, presionar "Calibrar pH 4"
+### pH
 
-El Event Log del dashboard confirma cada paso:
+1. **Borrar EEPROM** (opcional, solo si se quiere recalibrar desde cero) — botón "Borrar EEPROM" / "Borrar calibración"
+2. **Buffer pH 7** — sumergir el electrodo, esperar a que se estabilice, presionar "Calibrar pH 7" (guarda el voltaje actual como punto de 7.0)
+3. **Buffer pH 4** — enjuagar el electrodo, sumergir en buffer 4, esperar, presionar "Calibrar pH 4" (guarda el voltaje actual como punto de 4.0)
+
+No hay un orden estricto obligatorio entre pH 7 y pH 4 (a diferencia de la versión anterior con DFRobot_PH) — cada botón guarda su propio punto de la recta de calibración de forma independiente.
+
+El log de eventos confirma cada paso:
 ```
-[Arduino] PH_CAL_DONE: pH 7 (1437mV) pH=7.00
-[Arduino] PH_CAL_DONE: pH 4 (1965mV) pH=4.00
+[Arduino] PH_CAL_DONE: pH 7 (1502mV) pH=7.00
+[Arduino] PH_CAL_DONE: pH 4 (2035mV) pH=4.00
 ```
 
-La calibración se guarda en EEPROM y sobrevive reinicios del Arduino.
-
-**Rangos esperados de voltaje** (A0, 5V ref):
-- Buffer pH 7 → ~1322–1678 mV
-- Buffer pH 4 → ~1854–2210 mV
+La calibración se guarda en EEPROM y sobrevive reinicios del Arduino. Los campos `v7`/`v4` en el JSON de lectura permiten verificar en cualquier momento qué voltajes quedaron guardados.
 
 ### DO (oxígeno disuelto)
 
 1. Sacar el electrodo DO del agua y exponerlo al aire por 30 s
-2. Presionar "Cal. oxígeno" en el dashboard
+2. Presionar "Cal. oxígeno" / "DOCAL"
 
 ### Temperatura
 
@@ -231,9 +268,11 @@ No requiere calibración. El MAX6675 con termocouple tipo K es autocalibrante.
 | pH muestra −12 o valor absurdo | BNC del electrodo suelto del board Gravity | Re-sentar firmemente el conector BNC |
 | Temperatura stuck en 25.0°C | MAX6675 desconectado o SPI flotando | Verificar conexiones |
 | DO sube a 14+ mg/L | Temperatura leyendo 0°C (MISO flotante con MAX6675 ausente) | Conectar MAX6675 o desconectar TODOS sus cables |
-| Calibración pH sin efecto | `strupr()` de DFRobot_PH requiere strings mutables | El sketch usa `char[]` — no pasar literales `const char*` |
 | Arduino resetea al reconectar pusher | DTR toggling al abrir el puerto serial | Normal — la calibración persiste en EEPROM |
 | Lecturas erróneas al conectar MAX6675 | Pines SPI activos sin VCC/GND (backpowering) | Conectar GND y VCC antes que SCK/CS/SO |
+| ESP8266 no conecta a WiFi | Ninguna red de `secrets.h` disponible | Conectarse al portal cautivo `AlgaeMonitor-Setup` (aparece como red WiFi) y cargar una red nueva sin reflashear |
+| `http://algae.local` no resuelve | mDNS bloqueado por el router/red (común en redes corporativas o de universidad) | Usar la IP directa del ESP8266 (se imprime por Serial al bootear) |
+| Frontend no muestra datos nuevos | Lee Supabase cada 60s — el ESP8266 también sube cada 60s | Esperar hasta 2 minutos; si sigue sin datos, revisar `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` en `frontend/.env` |
 
 ---
 
@@ -243,24 +282,28 @@ No requiere calibración. El MAX6675 con termocouple tipo K es autocalibrante.
 Sensores-Ph-od/
 ├── arduino/
 │   ├── algae_monitor/
-│   │   └── algae_monitor.ino      # Sketch Arduino #1 (pH_DO_1) — pH+DO+Temp
-│   └── algae_monitor_2/
-│       └── algae_monitor_2.ino    # Sketch Arduino #2 (pH_DO_2)
+│   │   └── algae_monitor.ino      # Sketch Arduino #1 (pH_DO_1) — pH+DO+Temp, habla con el ESP8266
+│   ├── algae_monitor_2/
+│   │   └── algae_monitor_2.ino    # Sketch Arduino #2 (pH_DO_2)
+│   └── esp8266_bridge/
+│       ├── esp8266_bridge.ino     # Puente WiFi: sube a Supabase + sirve web de calibración
+│       └── secrets.h              # WiFi + Supabase credentials (gitignored, crear manualmente)
 ├── backend/
-│   ├── main.py                    # FastAPI app
+│   ├── main.py                    # FastAPI app (push opcional a Supabase)
 │   ├── requirements.txt
 │   └── readings.db                # SQLite (generado al correr)
 ├── pusher/
-│   ├── pusher.py                  # Bridge serial ↔ backend
+│   ├── pusher.py                  # Bridge serial ↔ backend (camino legacy/local)
 │   ├── requirements.txt
 │   └── .env                       # Config local (gitignored)
 ├── frontend/
 │   ├── src/
-│   │   └── App.jsx                # Dashboard React (componente único)
-│   ├── .env                       # Config local (gitignored)
+│   │   └── App.jsx                # Dashboard React — lee Supabase directo cada 60s
+│   ├── .env                       # Config local (gitignored) — incluye VITE_SUPABASE_URL/ANON_KEY
+│   ├── .env.example
 │   └── package.json
 ├── docs/
-│   ├── pcb-cl-001-hardware.md     # Shield PCB CL-001 + expansión WiFi ESP8266
+│   ├── pcb-cl-001-hardware.md     # Shield PCB CL-001 + puente WiFi ESP8266 (funcionando)
 │   ├── deploy-railway.md          # Guía paso a paso deploy backend en Railway
 │   └── migration-v2.md            # Plan de migración a Raspberry Pi + Supabase
 ├── CLAUDE.md                      # Contexto para agentes IA
@@ -272,10 +315,10 @@ Sensores-Ph-od/
 
 | Componente | Estado |
 |---|---|
-| Arduino #1 (pH_DO_1) + sensores pH/DO/Temp | Funcionando (COM3), calibrado |
+| Arduino #1 (pH_DO_1) + sensores pH/DO/Temp | Funcionando (COM3), calibración de 2 puntos propia |
 | Arduino #2 (pH_DO_2) | Sketch listo, mismo pinout que #1 |
-| Shield PCB CL-001 + WiFi (ESP8266MOD) | **En ensamblaje** — ver `docs/pcb-cl-001-hardware.md` |
-| `pusher/pusher.py` | Listo (corre en PC local) |
-| `backend/` FastAPI | Funcional en local; deploy en Railway documentado en `docs/deploy-railway.md`, pendiente ejecutar |
-| `frontend/` React dashboard | Funcional en local + GitHub Pages |
-| Migración a Raspberry Pi + Supabase (producción 24/7) | Planeada — ver `docs/migration-v2.md`, Raspberry Pi aún no adquirida |
+| Shield PCB CL-001 + WiFi (ESP8266MOD) | **Funcionando** — sube a Supabase cada minuto + sirve web de calibración en `algae.local` |
+| `pusher/pusher.py` + backend + WebSocket | Camino de desarrollo local, funcional |
+| `frontend/` React dashboard | Lee directo de Supabase cada 60s (producción) — GitHub Pages |
+| Deploy del backend en Railway | Documentado en `docs/deploy-railway.md`, no es indispensable ya que el camino de producción actual no depende del backend |
+| Migración a Raspberry Pi (Fase 2, `docs/migration-v2.md`) | Parcialmente superada — el ESP8266 ya resuelve la conectividad 24/7 sin depender de una PC ni de una RPi |

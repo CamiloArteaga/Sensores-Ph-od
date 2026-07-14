@@ -15,6 +15,18 @@ que funcione 24/7 sin depender de que nadie tenga su computador encendido.
 - [ ] Base de datos aún en SQLite (histórico se pierde en redeploy)
 - [ ] Raspberry Pi no adquirida todavía
 
+## Actualización 2026-07-13 — se tomó un atajo distinto al plan original
+
+En vez de Raspberry Pi (Fase 2) + backend con cliente Supabase (Fase 3 tal como está descrita abajo), se resolvió la conectividad 24/7 con un **ESP8266 conectado directo al Arduino** (`arduino/esp8266_bridge/`), que sube a Supabase por su cuenta vía PostgREST (sin pasar por FastAPI/Railway) y el frontend lee Supabase directo. Esto logra el objetivo de esta migración (no depender de una PC encendida) **sin necesitar RPi ni Railway**:
+
+- [x] Supabase con tabla `readings` recibiendo datos reales (vía ESP8266, no vía backend con `supabase-py` como se planeaba abajo)
+- [x] Frontend leyendo Supabase directo cada 60s (no WebSocket)
+- [ ] Backend con cliente Supabase (`supabase-py`, Fase 3 abajo) — **no se implementó así**; el backend solo tiene un push opcional con `requests` crudo (ver `backend/main.py`), no reemplazó SQLite
+- [ ] Raspberry Pi — sigue sin adquirirse; puede que ya no sea necesaria si el ESP8266 es suficiente para el caso de uso actual
+- [ ] Railway — sigue sin deploy; ya no es indispensable para que el monitoreo funcione 24/7, solo sería útil si se necesita el dashboard de calibración remoto sin estar en la misma red que el ESP8266
+
+**Decisión pendiente de Camilo:** si vale la pena seguir con Fase 2 (RPi) y Fase 3 tal como están descritas, o si el camino ESP8266→Supabase ya cubre las necesidades reales y estas fases se pueden dar por descartadas/reemplazadas.
+
 ---
 
 ## Fase 1 — Deploy inmediato (sin cambiar hardware)
