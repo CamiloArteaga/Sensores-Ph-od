@@ -19,3 +19,6 @@ frontend/.env
 # Editor
 .vscode/
 *.swp
+
+# Credenciales Arduino/ESP
+arduino/esp8266_bridge/secrets.h

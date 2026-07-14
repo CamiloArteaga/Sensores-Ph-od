@@ -7,6 +7,7 @@
 #include <DFRobot_PH.h>
 #include <EEPROM.h>
 #include <max6675.h>
+#include <SoftwareSerial.h>
 
 #define PH_PIN      A0
 #define DO_PIN      A1
@@ -26,6 +27,7 @@ const uint16_t DO_Table[41] = {
 
 DFRobot_PH ph;
 MAX6675    thermocouple(MAX_SCK, MAX_CS, MAX_SO);
+SoftwareSerial espSerial(2, 5); // RX=D2 (ESP TX) | TX=D5 (ESP RX, vía divisor 1k/2.2k) — D3 quedó dañado
 
 float temperature  = 25.0;
 float doCalVoltage = 1600.0;
@@ -33,10 +35,11 @@ float phVoltage, phValue;
 float doVoltage, doValue;
 
 void sendEvent(const char* event, const char* msg = "") {
-  Serial.print("{\"event\":\""); Serial.print(event);
-  Serial.print("\",\"id\":\"");  Serial.print(DEVICE_ID);
-  if (msg[0]) { Serial.print("\",\"msg\":\""); Serial.print(msg); }
-  Serial.println("\"}");
+  String line = "{\"event\":\"" + String(event) + "\",\"id\":\"" + DEVICE_ID + "\"";
+  if (msg[0]) line += ",\"msg\":\"" + String(msg) + "\"";
+  line += "}";
+  Serial.println(line);
+  espSerial.println(line);
 }
 
 // Lee voltage actual del pH (siempre fresco)
@@ -65,6 +68,7 @@ void calibratePH(const char* label) {
 
 void setup() {
   Serial.begin(9600);
+  espSerial.begin(9600);
   ph.begin();
   EEPROM.get(DO_CAL_ADDR, doCalVoltage);
   if (isnan(doCalVoltage) || doCalVoltage < 500 || doCalVoltage > 4500)
@@ -72,48 +76,57 @@ void setup() {
   delay(500);
 }
 
+void processCommand(String cmd) {
+  if (cmd == "CAL7") {
+    // Electrodo ya estabilizado en buffer pH 7 — calibra y guarda
+    calibratePH("pH 7");
+
+  } else if (cmd == "CAL4") {
+    // Electrodo ya estabilizado en buffer pH 4 — calibra y guarda
+    calibratePH("pH 4");
+
+  } else if (cmd == "RESETCAL") {
+    for (int i = 0; i < 40; i++) EEPROM.write(i, 0xFF);
+    doCalVoltage = 1600.0;
+    EEPROM.put(DO_CAL_ADDR, doCalVoltage);
+    ph.begin();
+    sendEvent("CAL_RESET", "EEPROM borrada");
+
+  } else if (cmd == "DOCAL") {
+    doCalVoltage = analogRead(DO_PIN) / 1024.0 * 5000.0;
+    EEPROM.put(DO_CAL_ADDR, doCalVoltage);
+    String line = "{\"event\":\"DO_CAL\",\"id\":\"" + String(DEVICE_ID) + "\",\"v\":" + String(doCalVoltage, 1) + "}";
+    Serial.println(line);
+    espSerial.println(line);
+
+  } else if (cmd.startsWith("TEMP:")) {
+    temperature = cmd.substring(5).toFloat();
+    sendEvent("TEMP_SET");
+
+  // Comandos legacy — se mantienen por compatibilidad
+  } else if (cmd == "ENTERPH") {
+    ph.calibration(phVoltage, temperature, "enterph");
+  } else if (cmd == "CALPH") {
+    ph.calibration(phVoltage, temperature, "calph");
+  } else if (cmd == "EXITPH") {
+    ph.calibration(phVoltage, temperature, "exitph");
+    sendEvent("PH_CAL_SAVED");
+  }
+}
+
 void loop() {
   static unsigned long lastRead = 0;
 
+  // Comandos desde el USB (monitor serial) o desde el ESP (web de calibración)
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
-
-    if (cmd == "CAL7") {
-      // Electrodo ya estabilizado en buffer pH 7 — calibra y guarda
-      calibratePH("pH 7");
-
-    } else if (cmd == "CAL4") {
-      // Electrodo ya estabilizado en buffer pH 4 — calibra y guarda
-      calibratePH("pH 4");
-
-    } else if (cmd == "RESETCAL") {
-      for (int i = 0; i < 40; i++) EEPROM.write(i, 0xFF);
-      doCalVoltage = 1600.0;
-      EEPROM.put(DO_CAL_ADDR, doCalVoltage);
-      ph.begin();
-      sendEvent("CAL_RESET", "EEPROM borrada");
-
-    } else if (cmd == "DOCAL") {
-      doCalVoltage = analogRead(DO_PIN) / 1024.0 * 5000.0;
-      EEPROM.put(DO_CAL_ADDR, doCalVoltage);
-      Serial.print("{\"event\":\"DO_CAL\",\"id\":\""); Serial.print(DEVICE_ID);
-      Serial.print("\",\"v\":"); Serial.print(doCalVoltage, 1);
-      Serial.println("}");
-
-    } else if (cmd.startsWith("TEMP:")) {
-      temperature = cmd.substring(5).toFloat();
-      sendEvent("TEMP_SET");
-
-    // Comandos legacy — se mantienen por compatibilidad
-    } else if (cmd == "ENTERPH") {
-      ph.calibration(phVoltage, temperature, "enterph");
-    } else if (cmd == "CALPH") {
-      ph.calibration(phVoltage, temperature, "calph");
-    } else if (cmd == "EXITPH") {
-      ph.calibration(phVoltage, temperature, "exitph");
-      sendEvent("PH_CAL_SAVED");
-    }
+    processCommand(cmd);
+  }
+  if (espSerial.available() > 0) {
+    String cmd = espSerial.readStringUntil('\n');
+    cmd.trim();
+    processCommand(cmd);
   }
 
   if (millis() - lastRead >= READ_MS) {
@@ -130,12 +143,13 @@ void loop() {
     uint8_t t = (uint8_t)constrain((int)temperature, 0, 40);
     doValue   = doVoltage / doCalVoltage * (DO_Table[t] / 1000.0);
 
-    Serial.print("{\"id\":\"");   Serial.print(DEVICE_ID);
-    Serial.print("\",\"pH\":");   Serial.print(phValue, 2);
-    Serial.print(",\"DO\":");     Serial.print(doValue, 2);
-    Serial.print(",\"temp\":");   Serial.print(temperature, 1);
-    Serial.print(",\"tc\":");     Serial.print(isnan(tRead) ? -999.0 : tRead, 1);
-    Serial.print(",\"ts\":");     Serial.print(millis());
-    Serial.println("}");
+    String line = "{\"id\":\"" + String(DEVICE_ID) +
+                  "\",\"pH\":" + String(phValue, 2) +
+                  ",\"DO\":" + String(doValue, 2) +
+                  ",\"temp\":" + String(temperature, 1) +
+                  ",\"tc\":" + String(isnan(tRead) ? -999.0 : tRead, 1) +
+                  ",\"ts\":" + String(millis()) + "}";
+    Serial.println(line);
+    espSerial.println(line);
   }
 }
