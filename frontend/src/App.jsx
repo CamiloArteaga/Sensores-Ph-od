@@ -10,8 +10,18 @@ import {
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const WS  = (import.meta.env.VITE_API_URL || "http://localhost:8000")
-              .replace(/^http/, "ws") + "/ws";
+
+// Supabase: el front lee las lecturas directo de la tabla `readings`. La publishable
+// key es pública por diseño (RLS solo permite SELECT; el ESP escribe con service_role),
+// por eso puede ir en el bundle. Refresco cada minuto (igual que sube el ESP).
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://obyfkdkvktnzixuhrhqm.supabase.co";
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_gSZ3SYbG_RJPJHXWUa59Jg_jZy92J_l";
+const REFRESH_MS   = 60000;
+
+const mapRow = r => ({
+  id: r.device_id, pH: r.ph, DO: r.do_mgl, temp: r.temperature,
+  timestamp: r.timestamp, time: r.timestamp,
+});
 
 const RANGES = {
   pH: { low: 7.0, high: 8.5, unit: "" },
@@ -633,36 +643,49 @@ export default function App() {
   const [log, setLog]                 = useState([]);
   const [temp, setTemp]               = useState("25.0");
   const [expandedChart, setExpanded]  = useState(null);
-  const ws = useRef(null);
 
   const addLog = msg =>
     setLog(l => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...l].slice(0, 60));
 
   useEffect(() => {
-    fetch(`${API}/api/history?hours=24`, {
-      headers: { "ngrok-skip-browser-warning": "true" },
-    })
-      .then(r => r.json())
-      .then(rows => setHistory(rows.map(r => ({ ...r, time: r.timestamp }))))
-      .catch(() => {});
-  }, []);
+    let alive = true;
+    let lastTs = null;
+    const base = `${SUPABASE_URL}/rest/v1/readings?select=device_id,ph,do_mgl,temperature,timestamp`;
 
-  useEffect(() => {
-    function connect() {
-      const sock = new WebSocket(WS);
-      ws.current = sock;
-      sock.onopen  = () => { setConnected(true);  addLog("Conectado al backend"); };
-      sock.onclose = () => { setConnected(false); addLog("Reconectando..."); setTimeout(connect, 3000); };
-      sock.onmessage = e => {
-        const data = JSON.parse(e.data);
-        if (data.event) { addLog(`[Arduino] ${data.event}${data.msg ? ': ' + data.msg : ''}`); return; }
-        const id = data.id || "unknown";
-        setDevices(prev => ({ ...prev, [id]: data }));
-        setHistory(h => [...h, { ...data, time: data.timestamp }].slice(-720));
-      };
+    async function load() {
+      const full = !lastTs;   // primera carga: 24h; luego solo lo nuevo
+      const url = full
+        ? `${base}&order=timestamp.desc&limit=1440`
+        : `${base}&timestamp=gt.${encodeURIComponent(lastTs)}&order=timestamp.asc`;
+      try {
+        const res = await fetch(url, {
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        let rows = (await res.json()).map(mapRow);
+        if (full) rows.reverse();   // desc → ascendente por tiempo
+        if (!alive) return;
+
+        if (rows.length) {
+          lastTs = rows[rows.length - 1].timestamp;
+          setHistory(h => (full ? rows : [...h, ...rows]).slice(-1440));
+          setDevices(prev => {
+            const next = { ...prev };
+            for (const r of rows) next[r.id] = r;
+            return next;
+          });
+          if (full) addLog("Datos cargados desde Supabase");
+        }
+        // "conectado" = la lectura más reciente tiene menos de 2.5 min
+        setConnected(!!lastTs && Date.now() - new Date(lastTs).getTime() < 150000);
+      } catch (e) {
+        if (alive) { setConnected(false); addLog(`Error Supabase: ${e.message}`); }
+      }
     }
-    connect();
-    return () => ws.current?.close();
+
+    load();
+    const t = setInterval(load, REFRESH_MS);
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
   // ngrok-skip-browser-warning evita la página de advertencia de ngrok en APIs
