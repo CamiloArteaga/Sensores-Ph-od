@@ -53,9 +53,11 @@ button{width:100%;padding:16px;margin:6px 0;font-size:1rem;border:0;border-radiu
 small{color:#8b98a5}</style></head><body>
 <h1>Calibración — pH_DO_1</h1>
 <div class="v">
-<div class="card">pH<b id="ph">--</b></div>
-<div class="card">OD (mg/L)<b id="do">--</b></div>
-<div class="card">Temp °C<b id="tp">--</b></div>
+<div class="card">pH<b id="vph">--</b></div>
+<div class="card">pH (mV)<b id="vphmv">--</b></div>
+<div class="card">OD (mg/L)<b id="vdo">--</b></div>
+<div class="card">OD (mV)<b id="vdomv">--</b></div>
+<div class="card">Temp °C<b id="vtemp">--</b></div>
 </div>
 <small>Mete el electrodo en el buffer, espera a que el valor se estabilice y pulsa el botón.</small>
 <button class="b7" onclick="cmd('CAL7')">Calibrar pH 7.0</button>
@@ -64,16 +66,21 @@ small{color:#8b98a5}</style></head><body>
 <button class="br" onclick="if(confirm('¿Borrar toda la calibración?'))cmd('RESETCAL')">Borrar calibración</button>
 <div id="evt">Sin eventos aún.</div>
 <script>
+const g=id=>document.getElementById(id);
 async function tick(){try{
  const d=await(await fetch('/live')).json();
- if(d.reading){ph.textContent=d.reading.pH??'--';document.getElementById('do').textContent=d.reading.DO??'--';tp.textContent=d.reading.temp??'--';}
- if(d.event){evt.textContent='['+d.event.event+'] '+(d.event.msg||('v='+d.event.v)||'');}
+ const r=d.reading;
+ if(r){g('vph').textContent=r.pH??'--';g('vphmv').textContent=r.phmv??'--';g('vdo').textContent=r.DO??'--';g('vdomv').textContent=r.domv??'--';g('vtemp').textContent=r.temp??'--';}
+ if(d.event){g('evt').textContent='['+d.event.event+'] '+(d.event.msg||('v='+d.event.v)||'');}
 }catch(e){}}
-async function cmd(c){evt.textContent='Enviando '+c+'…';await fetch('/cmd?c='+c);}
+async function cmd(c){g('evt').textContent='Enviando '+c+'…';await fetch('/cmd?c='+c);}
 setInterval(tick,1000);tick();
 </script></body></html>)HTML";
 
-void handleRoot()  { server.send_P(200, "text/html", CAL_PAGE); }
+void handleRoot()  {
+  server.sendHeader("Cache-Control", "no-store");   // evita que el navegador sirva una versión vieja de la página
+  server.send_P(200, "text/html", CAL_PAGE);
+}
 
 void handleLive() {
   String out = "{\"reading\":";
