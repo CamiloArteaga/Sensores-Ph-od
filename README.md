@@ -121,6 +121,7 @@ Puente WiFi entre el Arduino y la nube. Corre en un módulo ESP8266MOD conectado
 1. Se conecta a una de las redes WiFi conocidas (`secrets.h`, gitignorado); si ninguna conecta en 15s, levanta un portal cautivo `AlgaeMonitor-Setup` para agregar una red nueva sin reflashear.
 2. Sube la lectura más reciente del Arduino a Supabase (tabla `readings` vía PostgREST) una vez por minuto.
 3. Sirve una web de calibración en `http://algae.local` (mDNS) o por IP — lecturas en vivo a 1 Hz (`GET /live`) y botones que reenvían `CAL7`/`CAL4`/`DOCAL`/`RESETCAL` al Arduino (`GET /cmd?c=...`), sin pasar por Supabase ni por el backend.
+4. Sirve una página aparte en `/wifi` (enlazada desde la de calibración, pero separada para no mezclar botones) que muestra la red/IP actual y permite forzar el portal `AlgaeMonitor-Setup` a demanda — útil si la red configurada se vuelve inestable, sin esperar a que falle la conexión.
 
 **Archivo `secrets.h` requerido** (no versionado, crear manualmente):
 ```cpp

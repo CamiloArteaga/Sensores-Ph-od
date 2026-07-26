@@ -124,9 +124,13 @@ Puente WiFi — **no reemplaza** a `pusher.py`/backend, es un canal de producci�
 1. Conecta a WiFi (`WiFiMulti` con redes de `secrets.h`; si ninguna conecta en 15s, portal cautivo `AlgaeMonitor-Setup` vía `WiFiManager` — permite agregar una red sin reflashear).
 2. Cada 60s (`UPLOAD_MS`), sube la última lectura del Arduino a Supabase: `POST https://{SUPABASE_HOST}/rest/v1/readings` con headers `apikey`/`Authorization: Bearer` (PostgREST). Traduce campos: `id→device_id`, `pH→ph`, `DO→do_mgl`, `temp→temperature`.
 3. Sirve una web de calibración self-contained (HTML/JS inline en `PROGMEM`) en `http://algae.local` (mDNS) o por IP:
-   - `GET /` → página HTML
+   - `GET /` → página HTML (incluye enlace "Configurar WiFi" hacia `/wifi`)
    - `GET /live` → `{"reading":{...},"event":{...}}` (poll cada 1s desde el navegador)
    - `GET /cmd?c=CAL7|CAL4|DOCAL|RESETCAL` → reenvía el comando al Arduino por `arduinoLink` (SoftwareSerial D7/D6 del ESP)
+4. Sirve una página separada de configuración WiFi (sin botones de calibración, para evitar toques accidentales):
+   - `GET /wifi` → página HTML con la red/IP actual y un botón "Configurar nueva red"
+   - `GET /wifi/status` → `{"ssid":"...","ip":"..."}`
+   - `GET /wifi/start` → marca una bandera (`wifiPortalRequested`) atendida en `loop()`; ahí se hace `server.close()`, se abre `wm.startConfigPortal("AlgaeMonitor-Setup")` (portal forzado aunque ya esté conectado, con lista de redes escaneadas como un selector de WiFi normal) y al terminar se llama `server.begin()` de nuevo. **El `server.close()`/`server.begin()` es necesario**: sin eso, el portal de WiFiManager compite por el puerto 80 con nuestro propio servidor y la página del portal no carga (se queda cargando indefinidamente).
 
 **`WiFiClientSecure.setInsecure()`** — no valida el certificado TLS de Supabase. Es una decisión consciente (frágil de mantener certificados en un ESP8266), aceptable para datos de sensores no sensibles. No “arreglar” esto sin discutirlo primero — cambiarlo puede romper la subida si no se gestiona la cadena de certificados correctamente.
 

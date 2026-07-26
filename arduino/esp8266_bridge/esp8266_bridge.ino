@@ -14,6 +14,10 @@
 //
 // WiFi: intenta las redes conocidas de secrets.h; si ninguna conecta, levanta el
 // portal cautivo "AlgaeMonitor-Setup" para agregar una red nueva SIN reflashear.
+//
+// Además, en http://algae.local/wifi hay una página separada (sin botones de
+// calibración) para forzar ese mismo portal a demanda, aunque ya esté conectado
+// — útil si la red actual es inestable y quieres cambiarla sin desconectar el ESP.
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
@@ -50,8 +54,11 @@ h1{font-size:1.2rem}.v{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
 button{width:100%;padding:16px;margin:6px 0;font-size:1rem;border:0;border-radius:10px;color:#fff}
 .b7{background:#2563eb}.b4{background:#7c3aed}.bo{background:#0891b2}.br{background:#b91c1c}
 #evt{background:#1b2733;border-radius:10px;padding:12px;margin-top:12px;min-height:1.2em;font-size:.9rem}
-small{color:#8b98a5}</style></head><body>
+small{color:#8b98a5}
+.wifilink{display:block;text-align:center;padding:10px;margin-bottom:12px;border-radius:10px;background:#1b2733;color:#8b98a5;text-decoration:none;font-size:.9rem;border:1px dashed #374151}
+</style></head><body>
 <h1>Calibración — pH_DO_1</h1>
+<a class="wifilink" href="/wifi">⚙ Configurar WiFi</a>
 <div class="v">
 <div class="card">pH<b id="vph">--</b></div>
 <div class="card">pH (mV)<b id="vphmv">--</b></div>
@@ -75,6 +82,35 @@ async function tick(){try{
 }catch(e){}}
 async function cmd(c){g('evt').textContent='Enviando '+c+'…';await fetch('/cmd?c='+c);}
 setInterval(tick,1000);tick();
+</script></body></html>)HTML";
+
+// --- Web de configuración WiFi (página separada, sin botones de calibración) ---
+const char WIFI_PAGE[] PROGMEM = R"HTML(<!doctype html><html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WiFi Algae</title><style>
+body{font-family:system-ui,sans-serif;background:#0f1720;color:#e6edf3;margin:0;padding:16px}
+h1{font-size:1.2rem}
+.card{background:#1b2733;border-radius:12px;padding:14px 18px;margin:16px 0}
+button{width:100%;padding:16px;margin:6px 0;font-size:1rem;border:0;border-radius:10px;color:#fff;background:#2563eb}
+#msg{background:#1b2733;border-radius:10px;padding:12px;margin-top:12px;min-height:1.2em;font-size:.9rem}
+small{color:#8b98a5}</style></head><body>
+<h1>Configuración WiFi — pH_DO_1</h1>
+<div class="card">Red actual: <b id="ssid">--</b><br>IP: <b id="ip">--</b></div>
+<small>Al pulsar el botón, el ESP abre por ~3 min un punto de acceso "AlgaeMonitor-Setup" con la lista de redes cercanas para elegir una nueva. Mientras tanto la calibración y la subida a Supabase quedan en pausa.</small>
+<button onclick="startPortal()">Configurar nueva red</button>
+<div id="msg">Listo.</div>
+<script>
+const g=id=>document.getElementById(id);
+async function status(){try{
+ const d=await(await fetch('/wifi/status')).json();
+ g('ssid').textContent=d.ssid||'--';g('ip').textContent=d.ip||'--';
+}catch(e){}}
+async function startPortal(){
+ if(!confirm('¿Abrir el portal para elegir una nueva red WiFi?'))return;
+ g('msg').textContent='Abriendo portal… conéctate a "AlgaeMonitor-Setup" desde tu celular o PC.';
+ await fetch('/wifi/start');
+}
+status();
 </script></body></html>)HTML";
 
 void handleRoot()  {
@@ -102,15 +138,37 @@ void handleCmd() {
   }
 }
 
+void handleWifiPage() {
+  server.sendHeader("Cache-Control", "no-store");
+  server.send_P(200, "text/html", WIFI_PAGE);
+}
+
+void handleWifiStatus() {
+  String out = "{\"ssid\":\"" + WiFi.SSID() + "\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
+  server.send(200, "application/json", out);
+}
+
+bool wifiPortalRequested = false;  // levantada por /wifi/start, atendida en loop()
+
+void handleWifiStart() {
+  wifiPortalRequested = true;
+  server.send(200, "text/plain", "OK, abriendo portal de configuración...");
+}
+
 void ensureWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
 
   unsigned long start = millis();
-  while (wifiMulti.run() != WL_CONNECTED && millis() - start < 15000) {
+  wl_status_t res = wifiMulti.run();
+  Serial.print("[wifi][debug] primer intento status="); Serial.println(res);
+  while (res != WL_CONNECTED && millis() - start < 15000) {
     delay(300);
     Serial.print(".");
+    res = wifiMulti.run();
   }
   Serial.println();
+  Serial.print("[wifi][debug] resultado final wifiMulti="); Serial.print(res);
+  Serial.print(" WiFi.status()="); Serial.println(WiFi.status());
 
   if (WiFi.status() != WL_CONNECTED) {
     WiFiManager wm;
@@ -160,14 +218,21 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   const int count = sizeof(WIFI_CREDENTIALS) / sizeof(WIFI_CREDENTIALS[0]);
-  for (int i = 0; i < count; i++)
+  for (int i = 0; i < count; i++) {
     wifiMulti.addAP(WIFI_CREDENTIALS[i].ssid, WIFI_CREDENTIALS[i].pass);
+    Serial.print("[wifi][debug] red conocida compilada: '");
+    Serial.print(WIFI_CREDENTIALS[i].ssid);
+    Serial.println("'");
+  }
 
   ensureWiFi();
 
   server.on("/", handleRoot);
   server.on("/live", handleLive);
   server.on("/cmd", handleCmd);
+  server.on("/wifi", handleWifiPage);
+  server.on("/wifi/status", handleWifiStatus);
+  server.on("/wifi/start", handleWifiStart);
   server.begin();
 
   // mDNS: acceso por http://algae.local sin depender de la IP (que da el DHCP)
@@ -180,6 +245,21 @@ void setup() {
 }
 
 void loop() {
+  if (wifiPortalRequested) {
+    wifiPortalRequested = false;
+    delay(200);  // deja que la respuesta HTTP del /wifi/start salga antes de bloquear
+    server.close();  // libera el puerto 80: WiFiManager necesita su propio servidor ahí para el portal
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(180);
+    wm.startConfigPortal("AlgaeMonitor-Setup");  // fuerza el portal aunque ya esté conectado
+    server.begin();  // recupera nuestro servidor para / , /wifi, /cmd, etc.
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.print("WiFi reconfigurado, IP: ");
+      Serial.println(WiFi.localIP());
+    }
+    return;
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
     ensureWiFi();
     return;

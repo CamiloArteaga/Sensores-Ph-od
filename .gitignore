@@ -22,3 +22,6 @@ frontend/.env
 
 # Credenciales Arduino/ESP
 arduino/esp8266_bridge/secrets.h
+
+# Build artifacts arduino-cli
+arduino/*/build/
