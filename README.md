@@ -28,11 +28,11 @@ Mide **pH**, **oxígeno disuelto (DO)** y **temperatura**. Dashboard web accesib
 | DO board | GND | GND | |
 | MAX6675 | SCK | **D13** | SPI clock |
 | MAX6675 | CS | **D10** | Chip select |
-| MAX6675 | SO (MISO) | **D12** | Data out |
+| MAX6675 | SO (MISO) | **D9** | Data out |
 | MAX6675 | VCC | 5V | Conectar VCC+GND **antes** que los pines de señal |
 | MAX6675 | GND | GND | |
 
-> **Importante MAX6675:** Conectar siempre GND y VCC antes que SCK/CS/SO. Si se conectan señales sin alimentación, el chip se alimenta inversamente a través de los pines SPI y devuelve lecturas erróneas. Si se desconecta dejando los pines de señal flotantes, MISO (D12) puede hacer que `readCelsius()` devuelva 0.0°C, lo que corrompe el cálculo de DO.
+> **Importante MAX6675:** Conectar siempre GND y VCC antes que SCK/CS/SO. Si se conectan señales sin alimentación, el chip se alimenta inversamente a través de los pines SPI y devuelve lecturas erróneas. Si se desconecta dejando los pines de señal flotantes, MISO (D9) puede hacer que `readCelsius()` devuelva 0.0°C, lo que corrompe el cálculo de DO.
 
 ---
 

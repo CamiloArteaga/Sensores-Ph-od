@@ -12,7 +12,7 @@ Pines apilados que van encima del Arduino (la PCB queda encima, el Arduino debaj
 ```
 
 **Pendiente:** esta primera revisión de la PCB NO incluye pads para los pines
-digitales D10/D12/D13 (MAX6675 — CS/SO/SCK). Se agregan en una siguiente
+digitales D10/D9/D13 (MAX6675 — CS/SO/SCK). Se agregan en una siguiente
 revisión, una vez validadas las conexiones analógicas.
 
 ## Mapeo de sensores analógicos (confirmado contra el repo)
@@ -93,4 +93,4 @@ Arduino D5 (TX, 5V) ──[ R 1kΩ ]── nodo A ── RX del ESP8266
 - [ ] Terminar de soldar conectores pH (A0) y DO (A1) sobre la CL-001
 - [ ] Verificar continuidad de los 2 GND compartidos
 - [ ] Soldar LM1117T-3.3 + capacitores 10µF para alimentar el ESP8266 (confirmar si ya se hizo — el ESP8266 ya funciona con WiFi estable, revisar si sigue corriendo del regulador 3.3V nativo del Arduino o ya del LM1117T)
-- [ ] Diseñar siguiente revisión de PCB con pads D10/D12/D13 para MAX6675
+- [ ] Diseñar siguiente revisión de PCB con pads D10/D9/D13 para MAX6675

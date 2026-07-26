@@ -2,7 +2,7 @@
 // Arduino Uno: pH (electrodo + board Gravity) + DO (SEN0237) + Temperatura (MAX6675)
 //
 // Analog:  A0 = pH  |  A1 = DO
-// SPI:     D13=SCK  |  D12=SO(MISO)  |  D10=CS
+// SPI:     D13=SCK  |  D9=SO(MISO)  |  D10=CS
 //
 // Calibración de pH por 2 puntos propia (no DFRobot_PH): se guardan los voltajes
 // medidos en buffer 7.0 y 4.0 y se interpola linealmente. Así funciona con
@@ -17,7 +17,7 @@
 #define DO_PIN      A1
 #define MAX_SCK     13
 #define MAX_CS      10
-#define MAX_SO      12
+#define MAX_SO       9
 #define DEVICE_ID   "pH_DO_1"
 #define PH_V7_ADDR  0     // float: voltaje en buffer 7.0
 #define PH_V4_ADDR  4     // float: voltaje en buffer 4.0

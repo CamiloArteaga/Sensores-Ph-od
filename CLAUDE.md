@@ -23,7 +23,7 @@ El backend puede opcionalmente reenviar también a Supabase (`SUPABASE_URL`/`SUP
 |---|---|---|
 | pH | DFRobot SEN0161-V2 + electrodo H-101 (BNC) | A0 |
 | DO | DFRobot SEN0237 | A1 |
-| Temperatura | MAX6675 + termocouple K | D13=SCK, D10=CS, D12=SO |
+| Temperatura | MAX6675 + termocouple K | D13=SCK, D10=CS, D9=SO |
 
 Puerto serial: **COM3** en Windows, `/dev/ttyUSB0` en Linux/RPi.
 Baud rate: **9600**.
@@ -73,7 +73,7 @@ No hay orden obligatorio entre `CAL7` y `CAL4` — cada uno graba su propio punt
 ### 2. Filtro de temperatura
 
 El filtro es `5.0 < tRead < 60.0` (no `−10..100`).
-Razón: con MISO (D12) flotante y MAX6675 desconectado, `readCelsius()` devuelve `0.0°C` exacto, que pasa el filtro amplio. A 0°C la tabla DO_Table devuelve 14460 µg/L → DO falso de ~14.4 mg/L.
+Razón: con MISO (D9) flotante y MAX6675 desconectado, `readCelsius()` devuelve `0.0°C` exacto, que pasa el filtro amplio. A 0°C la tabla DO_Table devuelve 14460 µg/L → DO falso de ~14.4 mg/L.
 
 ### 3. EEPROM layout
 
