@@ -621,7 +621,7 @@ function CsvExportModal({ onClose }) {
     try {
       const res = await fetch(CSV_EXPORT_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           password,
           from: `${from}T00:00:00Z`,
