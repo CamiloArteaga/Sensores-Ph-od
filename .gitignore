@@ -25,3 +25,6 @@ arduino/esp8266_bridge*/secrets.h
 
 # Build artifacts arduino-cli
 arduino/*/build/
+
+# Cache local de Supabase CLI
+supabase/.temp/
