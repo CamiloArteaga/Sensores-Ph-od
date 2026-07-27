@@ -9,14 +9,15 @@ import {
 } from "recharts";
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
 // Supabase: el front lee las lecturas directo de la tabla `readings`. La publishable
 // key es pública por diseño (RLS solo permite SELECT; el ESP escribe con service_role),
 // por eso puede ir en el bundle. Refresco cada minuto (igual que sube el ESP).
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://obyfkdkvktnzixuhrhqm.supabase.co";
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_gSZ3SYbG_RJPJHXWUa59Jg_jZy92J_l";
 const REFRESH_MS   = 60000;
+
+// Edge Function que valida la contraseña del lado del servidor y arma el CSV
+const CSV_EXPORT_URL = `${SUPABASE_URL}/functions/v1/csv-export`;
 
 const mapRow = r => ({
   id: r.device_id, pH: r.ph, DO: r.do_mgl, temp: r.temperature,
@@ -53,13 +54,6 @@ function getStatus(key, val) {
   if (val >= low && val <= high) return "ÓPTIMO";
   if (val < low - 1 || val > high + 1) return "CRÍTICO";
   return "ALERTA";
-}
-
-function logColor(entry) {
-  if (entry.includes("Conectado")) return "#22c55e";
-  if (entry.includes("Reconectando") || entry.includes("error")) return "#f59e0b";
-  if (entry.includes("Enviado")) return "#0891b2";
-  return "#5a8a9f";
 }
 
 // ── Page stagger variants ──────────────────────────────────────────────────
@@ -575,77 +569,168 @@ function SensorChart({ title, subtitle, dataKey, unit, domain, refLines, history
   );
 }
 
-// ── CmdBtn ──────────────────────────────────────────────────────────────────
-function CmdBtn({ onClick, children, color = "#22c55e" }) {
+// ── CsvExportModal ──────────────────────────────────────────────────────────
+const csvInputStyle = {
+  background: "#071624", border: "1px solid #0a2540",
+  borderRadius: 8, color: "#e2f0f7", padding: "8px 10px",
+  fontSize: 13, fontFamily: "ui-monospace,monospace", outline: "none",
+  colorScheme: "dark",
+};
+
+function CsvSubmitBtn({ onClick, disabled, children }) {
   return (
-    <motion.button
+    <button
       onClick={onClick}
-      whileHover={{ scale: 1.05, backgroundColor: `${color}22` }}
-      whileTap={{ scale: 0.95 }}
-      transition={{ duration: 0.14 }}
+      disabled={disabled}
       style={{
-        padding: "5px 12px", fontSize: 12, fontWeight: 600,
-        borderRadius: 8, cursor: "pointer",
-        border: `1px solid ${color}30`,
-        background: `${color}12`, color,
+        padding: "10px 16px", fontSize: 13, fontWeight: 600,
+        borderRadius: 10, cursor: disabled ? "default" : "pointer",
+        border: "1px solid #00e5c340", background: "#00e5c318", color: "#00e5c3",
+        opacity: disabled ? 0.6 : 1,
       }}
     >
       {children}
-    </motion.button>
+    </button>
   );
 }
 
-// ── EventLog ─────────────────────────────────────────────────────────────────
-function EventLog({ log }) {
+function CsvExportModal({ onClose }) {
+  const [step, setStep]         = useState("range"); // "range" | "password"
+  const [from, setFrom]         = useState("");
+  const [to, setTo]             = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
+
+  useEffect(() => {
+    const handler = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const goToPassword = () => {
+    if (!from || !to) { setError("Selecciona ambas fechas"); return; }
+    setError("");
+    setStep("password");
+  };
+
+  const download = async () => {
+    if (!password) { setError("Ingresa la contraseña"); return; }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(CSV_EXPORT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY },
+        body: JSON.stringify({
+          password,
+          from: `${from}T00:00:00Z`,
+          to: `${to}T23:59:59Z`,
+        }),
+      });
+      if (res.status === 401) { setError("Contraseña incorrecta"); return; }
+      if (!res.ok) { setError("Error al generar el CSV"); return; }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url;
+      a.download = `readings_${from}_${to}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      onClose();
+    } catch {
+      setError("No se pudo conectar con el servidor");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div style={{
-      flex: 1,
-      background: "rgba(5,15,26,0.8)", border: "1px solid #071624",
-      borderRadius: 20, padding: 20,
-      display: "flex", flexDirection: "column", gap: 10,
-    }}>
-      <span style={{ fontSize: 10, color: "#5a8a9f", textTransform: "uppercase", letterSpacing: "0.12em" }}>
-        Log de eventos
-      </span>
-      <div style={{ maxHeight: 150, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-        <AnimatePresence initial={false}>
-          {log.length === 0 ? (
-            <span style={{ fontSize: 11, color: "#1a3550" }}>Sin eventos aún...</span>
-          ) : log.map(entry => {
-            const c = logColor(entry);
-            return (
-              <motion.div
-                key={entry}
-                style={{ display: "flex", alignItems: "flex-start", gap: 8 }}
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2 }}
-              >
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: c, flexShrink: 0, marginTop: 4 }} />
-                <span style={{ fontSize: 11, color: c, fontFamily: "ui-monospace,monospace", lineHeight: 1.5 }}>
-                  {entry}
-                </span>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
-    </div>
+    <motion.div
+      style={{
+        position: "fixed", inset: 0, zIndex: 50,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "clamp(12px,3vw,32px)",
+        background: "rgba(2,11,18,0.85)",
+        backdropFilter: "blur(8px)",
+      }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <motion.div
+        style={{
+          width: "100%", maxWidth: 380,
+          background: "rgba(5,15,26,0.98)", border: "1px solid #0d3b5e",
+          borderRadius: 24, padding: "clamp(16px,3vw,28px)",
+          boxShadow: "0 24px 80px rgba(0,229,195,0.06), 0 0 0 1px #00e5c310",
+          display: "flex", flexDirection: "column", gap: 14,
+        }}
+        initial={{ scale: 0.94, opacity: 0, y: 16 }}
+        animate={{ scale: 1,    opacity: 1, y: 0  }}
+        exit={{ scale: 0.94,    opacity: 0, y: 16 }}
+        transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#e2f0f7", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+            Descargar CSV
+          </h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: "#071624", border: "1px solid #0a2540",
+              color: "#5a8a9f", borderRadius: 10,
+              width: 32, height: 32, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 16, flexShrink: 0,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {step === "range" ? (
+          <>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "#5a8a9f" }}>
+              Desde
+              <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={csvInputStyle} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "#5a8a9f" }}>
+              Hasta
+              <input type="date" value={to} onChange={e => setTo(e.target.value)} style={csvInputStyle} />
+            </label>
+            {error && <span style={{ fontSize: 11, color: "#ef4444" }}>{error}</span>}
+            <CsvSubmitBtn onClick={goToPassword}>Continuar</CsvSubmitBtn>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 11, color: "#2a4a5e" }}>{from} → {to}</span>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "#5a8a9f" }}>
+              Contraseña
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") download(); }}
+                style={csvInputStyle} autoFocus />
+            </label>
+            {error && <span style={{ fontSize: 11, color: "#ef4444" }}>{error}</span>}
+            <CsvSubmitBtn onClick={download} disabled={loading}>
+              {loading ? "Descargando..." : "Descargar"}
+            </CsvSubmitBtn>
+          </>
+        )}
+      </motion.div>
+    </motion.div>
   );
 }
 
-// ── PhCalButtons ─────────────────────────────────────────────────────────────
 // ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [devices, setDevices]         = useState({});
   const [history, setHistory]         = useState([]);
   const [connected, setConnected]     = useState(false);
-  const [log, setLog]                 = useState([]);
-  const [temp, setTemp]               = useState("25.0");
   const [expandedChart, setExpanded]  = useState(null);
-
-  const addLog = msg =>
-    setLog(l => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...l].slice(0, 60));
+  const [showCsvExport, setShowCsvExport] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -674,12 +759,11 @@ export default function App() {
             for (const r of rows) next[r.id] = r;
             return next;
           });
-          if (full) addLog("Datos cargados desde Supabase");
         }
         // "conectado" = la lectura más reciente tiene menos de 2.5 min
         setConnected(!!lastTs && Date.now() - new Date(lastTs).getTime() < 150000);
-      } catch (e) {
-        if (alive) { setConnected(false); addLog(`Error Supabase: ${e.message}`); }
+      } catch {
+        if (alive) setConnected(false);
       }
     }
 
@@ -687,21 +771,6 @@ export default function App() {
     const t = setInterval(load, REFRESH_MS);
     return () => { alive = false; clearInterval(t); };
   }, []);
-
-  // ngrok-skip-browser-warning evita la página de advertencia de ngrok en APIs
-  const HEADERS = {
-    "Content-Type": "application/json",
-    "ngrok-skip-browser-warning": "true",
-  };
-
-  const sendCmd = async (cmd, deviceId) => {
-    await fetch(`${API}/api/command`, {
-      method: "POST",
-      headers: HEADERS,
-      body: JSON.stringify({ cmd, ...(deviceId ? { device_id: deviceId } : {}) }),
-    });
-    addLog(`Enviado: ${cmd}${deviceId ? ` → ${deviceId}` : ""}`);
-  };
 
   const water  = devices["pH_DO_1"]?.temp ?? devices["pH_DO_2"]?.temp;
   const lastTs = devices["pH_DO_1"]?.timestamp ?? devices["pH_DO_2"]?.timestamp;
@@ -854,59 +923,23 @@ export default function App() {
 
           <WaterDivider />
 
-          {/* ── Commands + Log ── */}
+          {/* ── Exportar datos ── */}
           <motion.section variants={item}>
-            <div className="flex flex-col sm:flex-row gap-4">
-
-              {/* Commands */}
-              <div style={{
-                minWidth: 240,
-                background: "rgba(5,15,26,0.8)", border: "1px solid #071624",
-                borderRadius: 20, padding: 20,
-                display: "flex", flexDirection: "column", gap: 14,
-              }}>
+            <div style={{
+              background: "rgba(5,15,26,0.8)", border: "1px solid #071624",
+              borderRadius: 20, padding: 20,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              flexWrap: "wrap", gap: 12,
+            }}>
+              <div>
                 <span style={{ fontSize: 10, color: "#5a8a9f", textTransform: "uppercase", letterSpacing: "0.12em" }}>
-                  Comandos
+                  Exportar datos
                 </span>
-
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, color: "#2a4a5e", whiteSpace: "nowrap" }}>Temp (°C)</span>
-                  <input value={temp} onChange={e => setTemp(e.target.value)} style={{
-                    width: 60, background: "#071624", border: "1px solid #0a2540",
-                    borderRadius: 8, color: "#e2f0f7", padding: "5px 8px",
-                    fontSize: 12, fontFamily: "ui-monospace,monospace", outline: "none",
-                  }} />
-                  <CmdBtn onClick={() => sendCmd(`TEMP:${temp}`)}>Set</CmdBtn>
-                </div>
-
-                {/* pH: 3 botones directos — el Arduino hace el ciclo completo */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 10, color: "#2a4a5e", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                    Calibrar pH
-                  </span>
-                  <CmdBtn onClick={() => sendCmd("RESETCAL")} color="#ef4444">
-                    Borrar EEPROM
-                  </CmdBtn>
-                  <CmdBtn onClick={() => sendCmd("CAL7")} color="#22c55e">
-                    Calibrar pH 7
-                  </CmdBtn>
-                  <CmdBtn onClick={() => sendCmd("CAL4")} color="#f59e0b">
-                    Calibrar pH 4
-                  </CmdBtn>
-                </div>
-
-                {/* DO: un solo botón */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 10, color: "#2a4a5e", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                    Calibrar DO
-                  </span>
-                  <CmdBtn onClick={() => sendCmd("DOCAL")} color="#0891b2">
-                    Cal. oxígeno
-                  </CmdBtn>
-                </div>
+                <p style={{ margin: "4px 0 0", fontSize: 11, color: "#2a4a5e" }}>
+                  Descarga las lecturas históricas en CSV por rango de fechas
+                </p>
               </div>
-
-              <EventLog log={log} />
+              <CsvSubmitBtn onClick={() => setShowCsvExport(true)}>⬇ Descargar CSV</CsvSubmitBtn>
             </div>
           </motion.section>
 
@@ -921,6 +954,13 @@ export default function App() {
             history={history}
             onClose={() => setExpanded(null)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── CSV export modal ── */}
+      <AnimatePresence>
+        {showCsvExport && (
+          <CsvExportModal onClose={() => setShowCsvExport(false)} />
         )}
       </AnimatePresence>
 
