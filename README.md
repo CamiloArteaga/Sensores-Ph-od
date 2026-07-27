@@ -7,7 +7,9 @@ Mide **pH**, **oxígeno disuelto (DO)** y **temperatura**. Dashboard web accesib
 
 ## Hardware
 
-### Componentes
+Hay **dos unidades físicas idénticas** funcionando en paralelo (mismos sensores, mismo pinout, mismo firmware base) — la tabla de identidad más abajo explica cómo distinguirlas.
+
+### Componentes (por unidad)
 
 | Componente | Modelo | Función |
 |---|---|---|
@@ -15,24 +17,45 @@ Mide **pH**, **oxígeno disuelto (DO)** y **temperatura**. Dashboard web accesib
 | Sensor pH | DFRobot Gravity pH board V2 (SEN0161-V2) + electrodo H-101 (BNC) | Mide pH del agua |
 | Sensor DO | DFRobot Gravity DO board (SEN0237) + electrodo DO | Mide oxígeno disuelto en mg/L |
 | Sensor temperatura | MAX6675 + termocouple tipo K | Mide temperatura del agua en °C |
+| Puente WiFi | Módulo ESP8266MOD + regulador LM1117T (3.3V), en shield PCB propio "CL-001" apilado sobre el Arduino | Sube lecturas a Supabase y sirve la web de calibración, sin depender de una PC |
 
-### Conexiones (pinout)
+### Conexiones — sensores → Arduino (igual en ambas unidades)
 
 | Sensor / Módulo | Pin del módulo | Pin Arduino | Notas |
 |---|---|---|---|
-| pH board (SEN0161-V2) | Analog out | **A0** | El BNC del electrodo debe quedar bien apretado en el board |
+| pH board (SEN0161-V2) | Analog out | **A0** | El BNC del electrodo debe quedar bien apretado en el board — si se suelta, el pH cae a −12 |
 | DO board (SEN0237) | Analog out | **A1** | |
-| pH board | VCC | 5V | |
-| pH board | GND | GND | |
-| DO board | VCC | 5V | |
-| DO board | GND | GND | |
+| pH board | VCC / GND | 5V / GND | |
+| DO board | VCC / GND | 5V / GND | |
 | MAX6675 | SCK | **D13** | SPI clock |
 | MAX6675 | CS | **D10** | Chip select |
-| MAX6675 | SO (MISO) | **D9** | Data out |
-| MAX6675 | VCC | 5V | Conectar VCC+GND **antes** que los pines de señal |
-| MAX6675 | GND | GND | |
+| MAX6675 | SO (MISO) | **D9** | Data out — originalmente D12, movido por daño físico de otro pin (ver nota D3 abajo) |
+| MAX6675 | VCC / GND | 5V / GND | Conectar VCC+GND **antes** que los pines de señal (evita backpowering) |
 
-> **Importante MAX6675:** Conectar siempre GND y VCC antes que SCK/CS/SO. Si se conectan señales sin alimentación, el chip se alimenta inversamente a través de los pines SPI y devuelve lecturas erróneas. Si se desconecta dejando los pines de señal flotantes, MISO (D9) puede hacer que `readCelsius()` devuelva 0.0°C, lo que corrompe el cálculo de DO.
+> **Importante MAX6675:** conectar siempre GND y VCC antes que SCK/CS/SO. Si se desconecta dejando los pines de señal flotantes, MISO puede hacer que `readCelsius()` devuelva 0.0°C, lo que corrompe el cálculo de DO (sube a ~14 mg/L falso). Filtro de temperatura en el sketch: `5.0 < T < 60.0`.
+
+### Conexiones — Arduino ↔ ESP8266 (enlace bidireccional, igual en ambas unidades)
+
+| Extremo Arduino | → | Extremo ESP8266 | Sentido | Notas |
+|---|---|---|---|---|
+| **D5** (TX) | → divisor 1kΩ/2.2kΩ → | **D7** / GPIO13 (RX) | Arduino habla, ESP escucha | El divisor es obligatorio: el Arduino es 5V y el ESP es 3.3V |
+| **D2** (RX) | ← | **D6** / GPIO12 (TX) | ESP habla, Arduino escucha | Sin divisor — el Arduino ya lee 3.3V como HIGH válido |
+| GND | — | GND | común | |
+
+> El plan original usaba D2/D3 del Arduino para este enlace, pero **D3 se dañó físicamente** y se movió a D5 — el pinout real y vigente es D2(RX)/D5(TX) del lado Arduino.
+
+### Identidad de cada unidad — cómo distinguirlas y a dónde suben sus datos
+
+| | **Unidad 1** | **Unidad 2** |
+|---|---|---|
+| Sketch Arduino | `arduino/algae_monitor/algae_monitor.ino` | `arduino/algae_monitor_2/algae_monitor_2.ino` |
+| `device_id` (columna en Supabase) | `pH_DO_1` | `pH_DO_2` |
+| Sketch del puente ESP8266 | `arduino/esp8266_bridge/esp8266_bridge.ino` | `arduino/esp8266_bridge_2/esp8266_bridge_2.ino` |
+| Web de calibración / config WiFi | `http://algae.local` | `http://algae2.local` |
+| SSID del portal de configuración WiFi | `AlgaeMonitor-Setup` | `AlgaeMonitor-Setup-2` |
+| Tabla Supabase (misma para ambas) | `readings`, filtrado por `device_id` | `readings`, filtrado por `device_id` |
+
+El `device_id` es lo único que distingue las filas de cada unidad en Supabase — lo pone el propio Arduino en el JSON (`"id":"pH_DO_1"` / `"id":"pH_DO_2"`) y el ESP8266 lo traduce a la columna `device_id` al subir (`id→device_id`, `pH→ph`, `DO→do_mgl`, `temp→temperature`). El mDNS y el SSID del portal están separados entre unidades a propósito, para poder tener las dos encendidas al mismo tiempo sin que compitan por el mismo nombre de red.
 
 ---
 
@@ -285,9 +308,12 @@ Sensores-Ph-od/
 │   ├── algae_monitor/
 │   │   └── algae_monitor.ino      # Sketch Arduino #1 (pH_DO_1) — pH+DO+Temp, habla con el ESP8266
 │   ├── algae_monitor_2/
-│   │   └── algae_monitor_2.ino    # Sketch Arduino #2 (pH_DO_2)
-│   └── esp8266_bridge/
-│       ├── esp8266_bridge.ino     # Puente WiFi: sube a Supabase + sirve web de calibración
+│   │   └── algae_monitor_2.ino    # Sketch Arduino #2 (pH_DO_2) — mismo firmware que #1
+│   ├── esp8266_bridge/
+│   │   ├── esp8266_bridge.ino     # Puente WiFi unidad 1: Supabase + web calibración (algae.local)
+│   │   └── secrets.h              # WiFi + Supabase credentials (gitignored, crear manualmente)
+│   └── esp8266_bridge_2/
+│       ├── esp8266_bridge_2.ino   # Puente WiFi unidad 2: mismo código, mDNS algae2.local
 │       └── secrets.h              # WiFi + Supabase credentials (gitignored, crear manualmente)
 ├── backend/
 │   ├── main.py                    # FastAPI app (push opcional a Supabase)
@@ -316,9 +342,10 @@ Sensores-Ph-od/
 
 | Componente | Estado |
 |---|---|
-| Arduino #1 (pH_DO_1) + sensores pH/DO/Temp | Funcionando (COM3), calibración de 2 puntos propia |
-| Arduino #2 (pH_DO_2) | Sketch listo, mismo pinout que #1 |
-| Shield PCB CL-001 + WiFi (ESP8266MOD) | **Funcionando** — sube a Supabase cada minuto + sirve web de calibración en `algae.local` |
+| Arduino #1 (pH_DO_1) + sensores pH/DO/Temp | Funcionando, calibración de 2 puntos propia |
+| ESP8266 unidad 1 (`algae.local`) | **Funcionando** — sube a Supabase cada minuto + web de calibración + reconfiguración WiFi a demanda (`/wifi`) |
+| Arduino #2 (pH_DO_2) + sensores pH/DO/Temp | Funcionando, mismo firmware que #1 |
+| ESP8266 unidad 2 (`algae2.local`) | Flasheado y probado; pendiente de verificar en la instalación final |
 | `pusher/pusher.py` + backend + WebSocket | Camino de desarrollo local, funcional |
 | `frontend/` React dashboard | Lee directo de Supabase cada 60s (producción) — GitHub Pages |
 | Deploy del backend en Railway | Documentado en `docs/deploy-railway.md`, no es indispensable ya que el camino de producción actual no depende del backend |
