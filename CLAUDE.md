@@ -50,6 +50,7 @@ frontend/.env                             — config local (gitignored), incluye
 docs/pcb-cl-001-hardware.md               — hardware PCB + pinout ESP8266 (fuente de verdad de pines)
 docs/deploy-railway.md                    — deploy backend en Railway (opcional, no bloqueante)
 docs/migration-v2.md                      — plan de migración a RPi/Supabase (Fase 3 en curso)
+supabase/functions/csv-export/index.ts    — Edge Function: exporta lecturas a CSV, valida contraseña server-side
 ```
 
 ---
@@ -176,15 +177,31 @@ Componente único `App`. **Ya no usa WebSocket como fuente principal** — lee d
 1. `fetch` periódico (cada `REFRESH_MS`=60000ms) a `{SUPABASE_URL}/rest/v1/readings` vía PostgREST, con headers `apikey`/`Authorization: Bearer {SUPABASE_ANON_KEY}` (clave `sb_publishable_...`, pública por diseño — RLS de Supabase solo permite SELECT con esa key, el ESP8266 escribe con la `service_role` key que sí es secreta)
 2. Primera carga: últimas 1440 filas (`order=timestamp.desc&limit=1440`, se revierte a ascendente). Cargas siguientes: solo filas con `timestamp gt` la última vista (`lastTs`)
 3. `setConnected(...)` se deriva de la frescura del dato: `true` si la lectura más reciente tiene menos de 2.5 minutos — no hay conexión persistente que monitorear, es polling
-4. `POST /api/command` (al backend FastAPI) sigue existiendo para los botones de calibración del dashboard — **eso sigue yendo por el camino legacy**, no por Supabase. Si el backend no está corriendo, los botones del dashboard no funcionan (usar la web del ESP8266 en su lugar, que si sirve calibración sin el backend)
 
-**Botones de calibración actuales (dashboard):**
-- Borrar EEPROM → `RESETCAL`
-- Calibrar pH 7 → `CAL7`
-- Calibrar pH 4 → `CAL4`
-- Cal. oxígeno → `DOCAL`
+**Ya no hay panel de comandos/calibración ni log de eventos en el dashboard** (se retiraron 2026-07-26: la calibración real se hace desde la web del ESP8266 en `algae.local`/`algae2.local`, tenerla duplicada en el dashboard vía backend legacy era un riesgo de toques accidentales). `CmdBtn`, `EventLog`, `sendCmd`, `API` (VITE_API_URL) ya no existen en `App.jsx`.
+
+**Exportar CSV:** botón "Descargar CSV" → modal pide rango de fechas → pide contraseña → `POST` a la Edge Function `supabase/functions/csv-export` (ver sección abajo). La contraseña se valida ahí, no en el bundle del frontend.
 
 Variables de entorno nuevas en `frontend/.env` (ver `.env.example`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+
+---
+
+## Supabase Edge Function: `csv-export` (`supabase/functions/csv-export/index.ts`)
+
+Exporta lecturas de `readings` a CSV por rango de fechas, protegido por contraseña validada **server-side** (nunca llega al navegador). Deployado con `--no-verify-jwt` (no requiere JWT de Supabase Auth; el gate de acceso es la contraseña propia, no el auth de Supabase).
+
+- Recibe `POST {password, from, to}` (ISO 8601).
+- Compara `password` contra el secret `CSV_EXPORT_PASSWORD` (`supabase secrets set`, nunca en el código).
+- Usa `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` — **inyectados automáticamente** por la plataforma en toda Edge Function, no hace falta configurarlos a mano.
+- Devuelve CSV con `Content-Disposition: attachment`.
+
+**CORS — no mandar el header `apikey` desde el frontend a esta función.** El `Access-Control-Allow-Headers` de la función solo incluye `content-type`. Si el fetch del navegador manda `apikey` (como sí hace el resto de llamadas a PostgREST), el preflight `OPTIONS` responde 200 pero el navegador bloquea la solicitud `POST` real sin ningún error explícito en consola — solo `TypeError: Failed to fetch`. Si se necesita mandar un header nuevo desde el frontend, agregarlo también a `Access-Control-Allow-Headers` en `index.ts`, o la request real se bloquea en silencio aunque el preflight "pase".
+
+**Deploy/redeploy:**
+```bash
+npx supabase functions deploy csv-export --project-ref obyfkdkvktnzixuhrhqm --no-verify-jwt
+```
+Requiere `SUPABASE_ACCESS_TOKEN` (token de cuenta, no las keys del proyecto) — generar uno temporal en https://supabase.com/dashboard/account/tokens y revocarlo después de usarlo. El login interactivo (`supabase login`) no funciona en entornos sin TTY/navegador.
 
 ---
 
@@ -198,6 +215,7 @@ Variables de entorno nuevas en `frontend/.env` (ver `.env.example`): `VITE_SUPAB
 | Frontend "desconectado" aunque el ESP sí sube datos | `setConnected` exige lectura de menos de 2.5 min; el ESP sube cada 60s — normal que haya un margen | Esperar hasta 2-3 min antes de asumir que algo falla |
 | Temperatura stuck 25.0°C | MAX6675 no conectado, usa fallback | Verificar GND + VCC + señales del MAX6675 |
 | Lecturas locas al conectar MAX6675 | Backpowering vía pines SPI sin VCC/GND | Conectar GND y VCC primero |
+| `fetch` a una Edge Function da "Failed to fetch" sin más detalle | Header no listado en `Access-Control-Allow-Headers` de la función (preflight pasa, la request real se bloquea) | Revisar qué headers manda el `fetch` vs. los que la función permite en CORS |
 
 ---
 

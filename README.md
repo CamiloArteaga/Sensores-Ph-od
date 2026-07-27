@@ -184,11 +184,14 @@ POLL_INTERVAL=1           # segundos entre polls de comandos
 
 ### Frontend (`frontend/`)
 
-React + Vite + Tailwind CSS + Recharts + Framer Motion.
+React + Vite + Tailwind CSS + Recharts + Framer Motion. Solo lectura/visualización — **no tiene panel de comandos ni calibración** (se retiró 2026-07-26 para evitar toques accidentales; calibrar siempre desde `algae.local`/`algae2.local`).
+
+**Exportar CSV:** botón "Descargar CSV" pide un rango de fechas y luego una contraseña antes de generar el archivo. La contraseña se valida en una Supabase Edge Function (`supabase/functions/csv-export/`), no en el navegador — ver esa carpeta para el detalle del deploy y el secret `CSV_EXPORT_PASSWORD`.
 
 **Variables de entorno** (crear `frontend/.env`, está en `.gitignore`):
 ```env
-VITE_API_URL=http://localhost:8000
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
 ```
 
 ---
@@ -256,7 +259,7 @@ npm run dev
 
 ## Procedimiento de calibración
 
-Se puede calibrar desde **dos lugares equivalentes** (mandan el mismo comando al Arduino): el dashboard React (`/api/command`) o la web del ESP8266 en `http://algae.local` — esta última es más simple para calibrar in-situ desde el celular, sin depender del backend.
+La calibración se hace desde la web propia del ESP8266 en `http://algae.local` (o `algae2.local` para la unidad 2) — simple de usar in-situ desde el celular, sin depender de una PC ni del backend. El dashboard React ya no tiene botones de calibración.
 
 ### pH
 
@@ -266,10 +269,10 @@ Se puede calibrar desde **dos lugares equivalentes** (mandan el mismo comando al
 
 No hay un orden estricto obligatorio entre pH 7 y pH 4 (a diferencia de la versión anterior con DFRobot_PH) — cada botón guarda su propio punto de la recta de calibración de forma independiente.
 
-El log de eventos confirma cada paso:
+La web de calibración del ESP8266 confirma cada paso en vivo (poll de `/live` cada 1s):
 ```
-[Arduino] PH_CAL_DONE: pH 7 (1502mV) pH=7.00
-[Arduino] PH_CAL_DONE: pH 4 (2035mV) pH=4.00
+PH_CAL_DONE: pH 7 (1502mV) pH=7.00
+PH_CAL_DONE: pH 4 (2035mV) pH=4.00
 ```
 
 La calibración se guarda en EEPROM y sobrevive reinicios del Arduino. Los campos `v7`/`v4` en el JSON de lectura permiten verificar en cualquier momento qué voltajes quedaron guardados.
@@ -325,10 +328,14 @@ Sensores-Ph-od/
 │   └── .env                       # Config local (gitignored)
 ├── frontend/
 │   ├── src/
-│   │   └── App.jsx                # Dashboard React — lee Supabase directo cada 60s
+│   │   └── App.jsx                # Dashboard React — lee Supabase directo cada 60s, exportar CSV
 │   ├── .env                       # Config local (gitignored) — incluye VITE_SUPABASE_URL/ANON_KEY
 │   ├── .env.example
 │   └── package.json
+├── supabase/
+│   └── functions/
+│       └── csv-export/
+│           └── index.ts           # Edge Function: valida contraseña y arma el CSV server-side
 ├── docs/
 │   ├── pcb-cl-001-hardware.md     # Shield PCB CL-001 + puente WiFi ESP8266 (funcionando)
 │   ├── deploy-railway.md          # Guía paso a paso deploy backend en Railway
@@ -347,6 +354,7 @@ Sensores-Ph-od/
 | Arduino #2 (pH_DO_2) + sensores pH/DO/Temp | Funcionando, mismo firmware que #1 |
 | ESP8266 unidad 2 (`algae2.local`) | Flasheado y probado; pendiente de verificar en la instalación final |
 | `pusher/pusher.py` + backend + WebSocket | Camino de desarrollo local, funcional |
-| `frontend/` React dashboard | Lee directo de Supabase cada 60s (producción) — GitHub Pages |
+| `frontend/` React dashboard | Lee directo de Supabase cada 60s (producción) — GitHub Pages. Sin panel de comandos; exportar CSV con contraseña |
+| `supabase/functions/csv-export` | **Funcionando** — desplegada, probada en vivo (contraseña correcta/incorrecta y CORS) |
 | Deploy del backend en Railway | Documentado en `docs/deploy-railway.md`, no es indispensable ya que el camino de producción actual no depende del backend |
 | Migración a Raspberry Pi (Fase 2, `docs/migration-v2.md`) | Parcialmente superada — el ESP8266 ya resuelve la conectividad 24/7 sin depender de una PC ni de una RPi |

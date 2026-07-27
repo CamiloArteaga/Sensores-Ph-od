@@ -29,8 +29,6 @@ jobs:
 
       - name: Build
         working-directory: frontend
-        env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: npm run build
 
       - name: Deploy to gh-pages
