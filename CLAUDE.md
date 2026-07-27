@@ -38,8 +38,10 @@ Device IDs: `pH_DO_1` (Arduino #1), `pH_DO_2` (Arduino #2).
 ```
 arduino/algae_monitor/algae_monitor.ino   — sketch Arduino #1, habla con el ESP8266 por D2/D5
 arduino/algae_monitor_2/algae_monitor_2.ino — sketch Arduino #2 (pH_DO_2)
-arduino/esp8266_bridge/esp8266_bridge.ino — puente WiFi: Supabase + web de calibración
+arduino/esp8266_bridge/esp8266_bridge.ino — puente WiFi Arduino #1: Supabase + web de calibración (mDNS `algae.local`, portal `AlgaeMonitor-Setup`)
 arduino/esp8266_bridge/secrets.h          — WiFi + Supabase credentials (gitignored)
+arduino/esp8266_bridge_2/esp8266_bridge_2.ino — mismo puente para Arduino #2 (mDNS `algae2.local`, portal `AlgaeMonitor-Setup-2`, evita chocar con el #1 si ambos están encendidos)
+arduino/esp8266_bridge_2/secrets.h        — WiFi + Supabase credentials del puente #2 (gitignored)
 backend/main.py                           — FastAPI (SQLite, WebSocket, command queue, push opcional a Supabase)
 pusher/pusher.py                          — bridge serial ↔ HTTP (camino legacy/local)
 frontend/src/App.jsx                      — dashboard React — lee Supabase directo (no WebSocket)
